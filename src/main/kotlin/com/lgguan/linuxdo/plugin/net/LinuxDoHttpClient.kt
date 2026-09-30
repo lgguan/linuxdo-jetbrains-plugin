@@ -3,9 +3,7 @@ package com.lgguan.linuxdo.plugin.net
 import com.lgguan.linuxdo.plugin.common.Constants
 import com.lgguan.linuxdo.plugin.common.BrowserIdentity
 import com.lgguan.linuxdo.plugin.config.LinuxDoSettingsState
-import com.intellij.util.net.HttpConfigurable
 import okhttp3.*
-import java.net.InetSocketAddress
 import java.net.Proxy
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
@@ -76,22 +74,12 @@ object LinuxDoHttpClient {
             builder.proxy(Proxy.NO_PROXY)
         } else {
             try {
-                val ideProxyConfig = HttpConfigurable.getInstance()
-                if (ideProxyConfig != null && ideProxyConfig.USE_HTTP_PROXY && ideProxyConfig.PROXY_HOST.isNotBlank()) {
-                    val proxyType = if (ideProxyConfig.PROXY_TYPE_IS_SOCKS) Proxy.Type.SOCKS else Proxy.Type.HTTP
-                    val proxy = Proxy(proxyType, InetSocketAddress(ideProxyConfig.PROXY_HOST, ideProxyConfig.PROXY_PORT))
-                    builder.proxy(proxy)
-
-                    if (ideProxyConfig.PROXY_AUTHENTICATION && !ideProxyConfig.proxyLogin.isNullOrBlank()) {
-                        builder.proxyAuthenticator { _, response ->
-                            val login = ideProxyConfig.proxyLogin ?: ""
-                            val credential = Credentials.basic(login, ideProxyConfig.plainProxyPassword ?: "")
-                            response.request.newBuilder().header("Proxy-Authorization", credential).build()
-                        }
-                    }
+                IdeProxySettings.current()?.let { proxy ->
+                    builder.proxy(proxy.javaProxy())
+                    builder.proxyAuthenticator(IdeProxySettings.authenticator(proxy))
                 }
             } catch (_: Throwable) {
-                // In unit test or environment where HttpConfigurable is not initialized
+                // Unit tests do not create the IDE proxy settings service.
             }
         }
 

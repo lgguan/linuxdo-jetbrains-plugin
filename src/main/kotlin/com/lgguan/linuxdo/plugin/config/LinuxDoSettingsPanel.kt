@@ -268,7 +268,7 @@ class LinuxDoSettingsPanel : com.intellij.openapi.Disposable {
 
             try { applyTo(LinuxDoSettingsState.getInstance()) }
             catch (e: com.intellij.openapi.options.ConfigurationException) {
-                dohTestResultLabel.text = e.message
+                dohTestResultLabel.text = "<html>${e.messageHtml}</html>"
                 return@addActionListener
             }
             val config = LinuxDoSettingsState.getInstance().toNetworkConfig()

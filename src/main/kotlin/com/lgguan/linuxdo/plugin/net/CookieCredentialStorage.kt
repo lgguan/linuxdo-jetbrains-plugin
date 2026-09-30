@@ -1,6 +1,5 @@
 package com.lgguan.linuxdo.plugin.net
 
-import com.intellij.credentialStore.CredentialAttributes
 import com.intellij.credentialStore.generateServiceName
 import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.openapi.application.ApplicationManager
@@ -14,7 +13,7 @@ internal interface CookieCredentialStorage {
 
 internal object PasswordSafeCookieStorage : CookieCredentialStorage {
     private fun attributes(key: String) =
-        CredentialAttributes(generateServiceName(Constants.PASSWORD_SAFE_SERVICE_NAME, key))
+        PasswordSafeAttributes.forService(generateServiceName(Constants.PASSWORD_SAFE_SERVICE_NAME, key))
 
     override fun read(key: String): String? = if (ApplicationManager.getApplication() == null) null
         else PasswordSafe.instance.getPassword(attributes(key))

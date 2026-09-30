@@ -20,7 +20,7 @@
     </ul>
     ]]></description>
 
-    <change-notes><![CDATA[1.0.0: Initial public release. Browse, search, create topics and replies, track reading progress and notifications in a documentation-style interface. Includes private JCEF login, floor navigation, a boss key, and LinuxDo DoH enabled by default.]]></change-notes>
+    <change-notes><![CDATA[1.0.0: Initial public release. Browse, search, create topics and replies, track reading progress and notifications in a documentation-style interface. Includes private JCEF login, floor navigation, a boss key, and LinuxDo DoH enabled by default. Updated IDE proxy configuration and credential access, theme detection, PasswordSafe attributes, and settings error rendering to remove deprecated API usages reported during initial review.]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.jcef</depends>

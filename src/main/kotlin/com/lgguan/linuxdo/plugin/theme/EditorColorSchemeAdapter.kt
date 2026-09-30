@@ -3,7 +3,7 @@
 import com.intellij.openapi.editor.colors.EditorColors
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.ui.ColorUtil
-import com.intellij.util.ui.UIUtil
+import com.intellij.ui.JBColor
 import java.awt.Color
 
 object EditorColorSchemeAdapter {
@@ -25,7 +25,7 @@ object EditorColorSchemeAdapter {
 
     fun getCurrentThemeColors(): ThemeColors {
         val scheme = try { EditorColorsManager.getInstance()?.globalScheme } catch (_: Throwable) { null }
-        val isDark = try { UIUtil.isUnderDarcula() } catch (_: Throwable) { true }
+        val isDark = try { !JBColor.isBright() } catch (_: Throwable) { true }
 
         val bg = scheme?.defaultBackground ?: (if (isDark) Color(0x2B, 0x2D, 0x30) else Color(0xF8, 0xF9, 0xFA))
         val fg = scheme?.defaultForeground ?: (if (isDark) Color(0xDF, 0xE1, 0xE5) else Color(0x1F, 0x23, 0x28))

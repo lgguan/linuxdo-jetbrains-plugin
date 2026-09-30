@@ -10,6 +10,7 @@
 | `smoke.py`、`smoke.init.gradle` | 跨平台检查入口及 Gradle 类路径导出 |
 | `StandaloneSmokeApplication.java`、`PluginCefSmoke.java`、`PortableJcefSmoke.java`、`PaginationSmoke.java` | JCEF 原生渲染、通信、会话、分页与资源释放检查 |
 | `IdePluginSmoke.java` | 在隔离 IDE 中检查安装包类加载 |
+| `proxy-migration-smoke.py`、`IdeProxyMigrationSmoke.java` | 用目标 IDE 的实际公共 API 和合成配置检查 HTTP/SOCKS 代理、代理凭据、PasswordSafe 属性及错误信息显示 |
 | `navigation-fixture.py`、`navigation-regression.js` | 浏览器中的长帖导航、频控和窄屏布局回归 |
 
 ## JCEF 与安装包检查
@@ -33,6 +34,16 @@ python tools/smoke.py host --ide-home '/path/to/IDE' --plugin-zip build/distribu
 Windows 示例：`python tools/smoke.py private --ide-home 'C:\path\to\WebStorm'`。默认离线构建，依赖尚未缓存时加 `--online`。联网模式默认使用 LinuxDo DoH，可通过 `--doh-url` 指定测试地址。
 
 独立 JCEF 检查需要桌面会话，Linux CI 可使用 `xvfb-run`。结果位于 `build/portable-smoke/`，成功标记为 `PORTABLE_NATIVE_PASS=true`；联网检查需各项断言通过且进程正常退出。安装包检查结果位于 `build/host-smoke/`；商业 IDE 的许可可能限制完整启动。模拟 Application 的检查不能替代安装包类加载验证，真实账号及桌面交互仍需按[跨平台指南](../docs/cross-platform.md)验收。
+
+## 代理 API 迁移检查
+
+先生成发布 ZIP，再运行以下命令。测试在独立进程中使用合成配置与凭据，不读取当前 IDE 的账号或修改真实代理设置：
+
+```sh
+python tools/proxy-migration-smoke.py --ide-home '/path/to/IDE'
+```
+
+成功标记为 `TARGET_IDE_PROXY_MIGRATION_PASS=true`，报告在 `build/proxy-migration-smoke/result.txt`。编译 SDK 为 241，插件通过运行时适配使用目标 IDE 的 `ProxySettings` / `ProxyCredentialStore` 公共 API。目标 IDE 262 内部仍以旧代理状态实现凭据接口，因此检查工具的合成状态包含旧类型引用；这些工具不打入发布包。
 
 ## 干净构建校验
 

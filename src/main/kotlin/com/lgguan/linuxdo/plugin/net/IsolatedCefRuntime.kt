@@ -98,11 +98,7 @@ class IsolatedCefRuntime private constructor(val config: LinuxDoNetworkConfig) :
                 "TimeoutTcpConnectAttempt:TimeoutTcpConnectAttemptMin/2s/TimeoutTcpConnectAttemptMax/5s"
             if (config.proxyPolicy == ProxyPolicy.DIRECT) args += "--no-proxy-server"
             else {
-                val proxy = com.intellij.util.net.HttpConfigurable.getInstance()
-                if (proxy.USE_HTTP_PROXY) {
-                    val scheme = if (proxy.PROXY_TYPE_IS_SOCKS) "socks5" else "http"
-                    args += "--proxy-server=$scheme://${proxy.PROXY_HOST}:${proxy.PROXY_PORT}"
-                }
+                IdeProxySettings.current()?.let { args += it.browserArgument() }
             }
             if (config.isDohEnabled && config.effectiveBootstrapIp.isNotBlank()) {
                 val host = DohEndpoint.parse(config.effectiveDohUrl).url.host
