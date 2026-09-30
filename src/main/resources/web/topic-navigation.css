@@ -1,0 +1,61 @@
+/* Keep navigation outside the reading surface, with room for the final reply. */
+body { padding-bottom: 112px; }
+.topic-navigation {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 50;
+    display: grid;
+    grid-template-columns: auto auto minmax(72px, 1fr) auto;
+    align-items: center;
+    gap: 8px 16px;
+    padding: 10px max(16px, calc((100vw - 980px) / 2));
+    margin: 0;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-family);
+    font-size: 12px;
+    line-height: 1.4;
+    box-shadow: 0 -4px 16px #0000000a;
+}
+.floor-progress-label { color: var(--comment); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.floor-progress-slider { width: 100%; min-width: 0; margin: 0; accent-color: var(--link); cursor: pointer; }
+.floor-jump-controls { display: flex; gap: 6px; align-items: center; }
+.topic-navigation input[type=text] {
+    width: 68px;
+    height: 30px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0 8px;
+    background: var(--code-bg);
+    color: var(--fg);
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+}
+.topic-nav-button, .topic-load-button {
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.topic-nav-button { height: 30px; padding: 0 10px; }
+.topic-refresh-button { border-color: transparent; color: var(--comment); }
+.topic-jump-button { color: var(--link); }
+.topic-nav-button:hover:not(:disabled), .topic-load-button:hover:not(:disabled) { background: var(--code-bg); border-color: var(--link); }
+.topic-navigation :focus-visible, .topic-load-button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.topic-navigation :disabled, .topic-load-button:disabled { opacity: .5; cursor: default; }
+.topic-navigation-status { grid-column: 1 / -1; color: var(--comment); font-size: 12px; }
+.topic-navigation-status[hidden] { display: none; }
+.is-cooling-down .topic-navigation-status { color: var(--fg); }
+.topic-load-button { display: block; margin: 12px auto; padding: 6px 12px; font-size: 12px; color: var(--comment); }
+@media (max-width: 600px) {
+    body { padding-bottom: 140px; }
+    .topic-navigation { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding: 10px 12px; }
+    .floor-progress-label { text-align: center; }
+    .floor-progress-slider { grid-row: 2; grid-column: 1 / -1; }
+    .floor-jump-controls { grid-row: 1; grid-column: 3; }
+    .topic-navigation input[type=text] { width: 60px; }
+}

@@ -1,0 +1,41 @@
+# Gradle
+.gradle/
+build/
+
+# Kotlin
+.kotlin/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and runtime files
+*.log
+*.hprof
+*.tmp
+*.bak
+
+# Local browser diagnostics and screenshots
+.playwright-cli/
+output/
+.gradle-local/
+
+# Local credentials and environment configuration
+.env
+.env.*
+*.env
+.envrc
+.secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+__pycache__/

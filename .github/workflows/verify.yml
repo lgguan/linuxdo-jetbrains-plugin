@@ -1,0 +1,52 @@
+name: Cross-platform verification
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Test and package (Windows)
+        if: runner.os == 'Windows'
+        run: .\gradlew.bat test buildPlugin --console=plain
+      - name: Test and package (macOS / Linux)
+        if: runner.os != 'Windows'
+        run: ./gradlew test buildPlugin --console=plain
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-${{ matrix.os }}
+          path: |
+            build/distributions/*.zip
+            build/reports/tests/test/
+            build/test-results/test/
+  plugin-verifier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Full binary compatibility on current 262 IDE
+        run: ./gradlew runPluginVerifier --console=plain
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plugin-verifier-262
+          path: build/reports/pluginVerifier/

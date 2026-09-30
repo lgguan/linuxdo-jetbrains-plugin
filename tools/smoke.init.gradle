@@ -1,0 +1,11 @@
+allprojects {
+  afterEvaluate {
+    tasks.register('writeSmokeClasspath') {
+      doLast {
+        project.file('build').mkdirs()
+        project.file('build/smoke-classpath.txt').text = project.sourceSets.test.runtimeClasspath.asPath
+        project.file('build/smoke-plugin-path.txt').text = tasks.named('buildPlugin').get().archiveFile.get().asFile.absolutePath
+      }
+    }
+  }
+}

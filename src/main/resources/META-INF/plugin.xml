@@ -1,0 +1,75 @@
+<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
+<!-- Okio's AsyncTimeout Watchdog has no shutdown API and retains the plugin
+     classloader for its 60-second idle timeout. Do not attempt dynamic unload. -->
+<idea-plugin require-restart="true">
+    <id>com.lgguan.linuxdo.plugin</id>
+    <name>Linux Do (API Docs)</name>
+    <vendor>lgguan</vendor>
+
+    <description><![CDATA[
+    <h3>Linux Do — Unofficial Community Client</h3>
+    <p>An independent, personal project by lgguan, licensed under MIT. Not affiliated with or endorsed by Linux Do or JetBrains. Only https://linux.do is supported.</p>
+    <p>Supports Windows, macOS and Linux. Requires JetBrains IDE 2026.2 (build 262.*) with its bundled JBR and JCEF plugin.</p>
+    <p>A native JetBrains IDE plugin for browsing <b>Linux Do (Discourse)</b> community forum, featuring:</p>
+    <ul>
+        <li><b>Developer Documentation / Code Camouflage Mode</b>: Integrates seamlessly into the IDE editor with Monospace/JetBrains Mono typography, Git-Log/Issue-tracker style list, and RFC/Javadoc formatted post reader.</li>
+        <li><b>DNS-over-HTTPS (DoH)</b>: Defaults to LinuxDo DoH (https://ldh.ddd.oaifree.com/query-dns). Custom HTTPS resolvers and system DNS are also available.</li>
+        <li><b>Cloudflare Verification &amp; Auth</b>: Integrated JCEF authentication to solve Cloudflare Turnstile challenges and persist session credentials securely via PasswordSafe.</li>
+        <li><b>Discourse API Features</b>: Topic lists (Latest, Top, New, Unread), categories filter, full-text search, rich post reading, read progress tracking (/topics/timings sync), and Git-commit style reply composer.</li>
+        <li><b>Boss Key (Emergency Mode)</b>: Hide all topic tabs and the API Docs panel; press again to restore.</li>
+    </ul>
+    ]]></description>
+
+    <change-notes><![CDATA[1.0.0: Initial public release. Browse, search, create topics and replies, track reading progress and notifications in a documentation-style interface. Includes private JCEF login, floor navigation, a boss key, and LinuxDo DoH enabled by default.]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.jcef</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Tool Window -->
+        <toolWindow id="API Docs"
+                    anchor="right"
+                    secondary="false"
+                    factoryClass="com.lgguan.linuxdo.plugin.ui.toolwindow.LinuxDoToolWindowFactory"
+                    icon="AllIcons.Toolwindows.Documentation"/>
+
+        <!-- Application Settings & Services -->
+        <applicationService serviceImplementation="com.lgguan.linuxdo.plugin.net.LinuxDoPluginLifetime"/>
+        <applicationService serviceImplementation="com.lgguan.linuxdo.plugin.config.LinuxDoSettingsState"/>
+        <applicationService serviceImplementation="com.lgguan.linuxdo.plugin.service.LinuxDoNotificationService"/>
+        <applicationService serviceImplementation="com.lgguan.linuxdo.plugin.service.LinuxDoReadTrackingService"/>
+        <applicationService serviceImplementation="com.lgguan.linuxdo.plugin.service.LinuxDoTopicService"/>
+        <applicationService serviceImplementation="com.lgguan.linuxdo.plugin.service.LinuxDoAuthService"/>
+        <applicationConfigurable parentId="tools"
+                                 instance="com.lgguan.linuxdo.plugin.config.LinuxDoSettingsConfigurable"
+                                 id="com.lgguan.linuxdo.plugin.config.LinuxDoSettingsConfigurable"
+                                 displayName="Linux Do (API Docs)"/>
+        <!-- Status Bar Widget -->
+        <statusBarWidgetFactory id="com.lgguan.linuxdo.plugin.ui.widget.LinuxDoStatusBarWidget"
+                                implementation="com.lgguan.linuxdo.plugin.ui.widget.LinuxDoStatusBarWidgetFactory"/>
+
+        <!-- File Editor Provider for Topic Reading in Main Editor Area -->
+        <fileEditorProvider implementation="com.lgguan.linuxdo.plugin.editor.LinuxDoTopicEditorProvider"/>
+
+        <!-- Notification Group for Real-time Balloon Toasts -->
+        <notificationGroup id="LinuxDo Notifications"
+                           displayType="BALLOON"/>
+
+    </extensions>
+
+    <actions>
+        <action id="com.lgguan.linuxdo.plugin.action.BossKeyAction"
+                class="com.lgguan.linuxdo.plugin.action.BossKeyAction"
+                text="Toggle Doc Camouflage (Boss Key)"
+                description="Hide or restore all topic tabs and the API Docs panel">
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift H"/>
+        </action>
+        <action id="com.lgguan.linuxdo.plugin.action.CreateTopicAction"
+                class="com.lgguan.linuxdo.plugin.action.CreateTopicAction"
+                text="Linux Do: 新建话题 (New Topic)"
+                description="打开创建话题/发帖窗口发布新内容至社区"
+                icon="AllIcons.General.Add">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
