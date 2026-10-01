@@ -180,7 +180,8 @@ class CategoryAndAdvancedSearchTest {
         // 2. 429 Rate limit
         val raw429 = "HTTP 429: Too Many Requests"
         val formatted429 = IssueListPanel.formatErrorDisplay(raw429)
-        assertTrue(formatted429.contains("429") && formatted429.contains("防风控安全熔断保护"), "Must explain 429 rate limit protection: $formatted429")
+        assertTrue(formatted429.contains("429") && formatted429.contains("论坛请求频率限制"), "Must explain forum rate limiting: $formatted429")
+        assertTrue(IssueListPanel.formatErrorDisplay("HTTP 429: Cloudflare Too Many Requests").contains("人机验证"))
 
         // 3. Cloudflare challenge
         val rawCf = "Cloudflare 安全验证未通过 (HTTP 403)"

@@ -23,7 +23,10 @@ class ScrollableSourceBlocksTest {
         assertFalse(rendered.contains("<style>"))
         assertTrue(rendered.contains(TopicDocumentRenderer.escapeHtml(source)))
         for (fold in listOf(false, true)) {
-            assertEquals(rendered, TopicDocumentRenderer.processContent(rendered, fold))
+            val document = org.jsoup.Jsoup.parse(TopicDocumentRenderer.processContent(rendered, fold))
+            assertEquals(source, document.selectFirst("pre code")?.wholeText())
+            assertEquals("Before", document.selectFirst("p")?.text())
+            assertTrue(document.select("script, style, svg").isEmpty())
         }
     }
 

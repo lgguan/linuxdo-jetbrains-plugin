@@ -12,6 +12,8 @@ The distribution includes these dependencies and their respective licenses:
 | Gson | 2.11.0 | Google Inc.; Apache-2.0 — https://github.com/google/gson/blob/gson-parent-2.11.0/LICENSE |
 | Error Prone annotations | 2.27.0 | Google Inc.; Apache-2.0 — https://github.com/google/error-prone/blob/v2.27.0/COPYING |
 | jsoup | 1.18.3 | Jonathan Hedley; MIT — https://github.com/jhy/jsoup/blob/jsoup-1.18.3/LICENSE |
+| CommonMark Java and table, autolink, strikethrough, task-list extensions | 0.30.0 | Robin Stocker; BSD-2-Clause — https://github.com/commonmark/commonmark-java/blob/commonmark-parent-0.30.0/LICENSE.txt |
+| autolink-java | 0.12.0 | Robin Stocker; MIT — https://github.com/robinst/autolink-java/blob/master/LICENSE |
 | Public Suffix List (inside OkHttp) | bundled with OkHttp 4.12.0 | Mozilla Public License 2.0 — https://publicsuffix.org/list/public_suffix_list.dat |
 
 Upstream JAR license/notice resources are preserved. Additional license texts are

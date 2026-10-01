@@ -144,9 +144,28 @@ class MarketplaceSafetyTest {
         assertInstanceOf(CsrfRejectedException::class.java, HttpFailure.classify(403, emptyMap(), "invalid_csrf"))
         assertInstanceOf(HttpStatusException::class.java, HttpFailure.classify(403, mapOf("Server" to "cloudflare"), "Forbidden"))
         assertInstanceOf(CloudflareChallengeException::class.java, HttpFailure.classify(403, mapOf("Cf-Mitigated" to "challenge"), ""))
-        val limited = HttpFailure.classify(429, mapOf("retry-after" to "120", "cf-mitigated" to "challenge"), "") as RateLimitException
+        val limited = HttpFailure.classify(429, mapOf("retry-after" to "120", "Server" to "cloudflare"), "Too Many Requests") as RateLimitException
         assertEquals(120, limited.retryAfterSeconds)
         assertEquals(60, HttpFailure.retryAfter("Wed, 30 Sep 2026 00:01:00 GMT", java.time.Instant.parse("2026-09-30T00:00:00Z").toEpochMilli()))
+    }
+
+    @Test fun `Cloudflare 429 requires verification in Java and JCEF without disclosing error content`() {
+        val payloads = listOf(
+            mapOf("cf-mitigated" to "challenge") to "",
+            mapOf("Content-Type" to "text/html") to "<title>Just a moment</title><script>challenge-platform</script>",
+            emptyMap<String, String>() to "CloudFlare 429: private error detail",
+            mapOf("Content-Type" to "application/json") to """{"errors":["Cloudflare verification required"]}"""
+        )
+        for ((headers, body) in payloads) {
+            val failure = HttpFailure.classify(429, headers, body)
+            val response = LinuxDoJcefBridge.BridgeResponse(status = 429, headers = headers, body = body)
+            val cefFailure = HttpFailure.classify(response.status, response.headers.orEmpty(), response.body.orEmpty())
+            assertInstanceOf(CloudflareChallengeException::class.java, failure)
+            assertEquals(failure!!::class, cefFailure!!::class)
+            assertEquals("Cloudflare 人机验证未通过 (HTTP 429)", failure.message)
+            assertTrue(com.lgguan.linuxdo.plugin.ui.dialog.ComposerErrors.parse(failure).contains("人机验证"))
+            assertTrue(com.lgguan.linuxdo.plugin.ui.toolwindow.IssueListPanel.formatErrorDisplay(failure.message).contains("人机验证"))
+        }
     }
 
     @Test fun `session changes reject stale csrf and cookie responses`() {

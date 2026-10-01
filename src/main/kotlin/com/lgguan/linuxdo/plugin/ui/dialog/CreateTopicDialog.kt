@@ -1,6 +1,9 @@
 ﻿package com.lgguan.linuxdo.plugin.ui.dialog
 
-import com.lgguan.linuxdo.plugin.service.LinuxDoAuthService
+import com.lgguan.linuxdo.plugin.service.*
+import com.lgguan.linuxdo.plugin.model.ComposerCapabilities
+import com.lgguan.linuxdo.plugin.model.PublishOutcome
+import com.lgguan.linuxdo.plugin.model.UnconfirmedPublishException
 
 import com.lgguan.linuxdo.plugin.net.SessionEpoch
 import com.lgguan.linuxdo.plugin.api.DiscourseApiClient
@@ -28,6 +31,8 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.popup.JBPopup
 import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.ui.popup.JBPopupListener
+import com.intellij.openapi.ui.popup.LightweightWindowEvent
 import com.intellij.ui.JBColor
 import com.intellij.ui.JBSplitter
 import com.intellij.ui.awt.RelativePoint
@@ -51,37 +56,100 @@ import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 import javax.swing.text.html.HTMLEditorKit
 
-class CreateTopicDialog(
+class CreateTopicDialog private constructor(
     private val project: Project,
     private val initialCategoryId: Int? = null,
-    private val onTopicCreated: ((Post) -> Unit)? = null
+    private val onTopicCreated: ((Post) -> Unit)?,
+    private val draftSession: ForumDraftSession,
+    private val environment: TopicComposerEnvironment
 ) : DialogWrapper(project, true) {
+
+    constructor(project: Project, initialCategoryId: Int? = null, onTopicCreated: ((Post) -> Unit)? = null) :
+        this(project, initialCategoryId, onTopicCreated, ForumDraftSession(ForumDraftSession.NEW_TOPIC_KEY), ForumTopicComposerEnvironment)
+    companion object {
+        private val editors = mutableMapOf<String, CreateTopicDialog>()
+        fun open(project: Project, initialCategoryId: Int? = null, onTopicCreated: ((Post) -> Unit)? = null) {
+            openEditor(project, initialCategoryId, onTopicCreated, ForumDraftSession(ForumDraftSession.NEW_TOPIC_KEY), ForumTopicComposerEnvironment)
+        }
+        private fun openEditor(project: Project, initialCategoryId: Int?, onTopicCreated: ((Post) -> Unit)?,
+            session: ForumDraftSession, environment: TopicComposerEnvironment): CreateTopicDialog {
+            val registry = "${DiscourseApiClient.getBaseUrl()}:${session.version}:new_topic"
+            val existing = editors[registry]
+            if (existing != null && !existing.isDisposed) {
+                existing.window?.toFront()
+                return existing
+            }
+            return CreateTopicDialog(project, initialCategoryId, onTopicCreated, session, environment).also { dialog ->
+                dialog.registryKey = registry
+                editors[registry] = dialog
+                dialog.show()
+            }
+        }
+        internal fun openForTesting(project: Project, session: ForumDraftSession, environment: TopicComposerEnvironment) =
+            openEditor(project, null, null, session, environment)
+        internal fun forTesting(project: Project, session: ForumDraftSession, environment: TopicComposerEnvironment) =
+            CreateTopicDialog(project, null, null, session, environment)
+    }
+    private var registryKey: String? = null
+    private var capabilities = ComposerCapabilities()
+    private var categories = emptyList<Category>()
+    private var categoriesReady = false
+    private var restoredCategory: Int? = null
+    private val tagMetadata = mutableMapOf<String, TagItem>()
+    private val invalidTags = mutableMapOf<String, String>()
+    private val tagStatus = JBLabel()
+    private var tagGeneration = 0L
+    private var validatingTags = false
+    private var tagValidationGeneration = 0L
+    private var draftReady = false
+    private var draftBusy = false
+    private var draftBlocked = false
+    private var publishing = false
+    private var unconfirmed = false
+    private var suppressDraft = false
+    private var pendingAction: (() -> Unit)? = null
+    private val draftAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, disposable)
+    private val draftStatus = JBLabel("正在读取论坛草稿…")
+    private val publishCheck = JButton("检查发布结果").apply {
+        isVisible = false
+        addActionListener { checkPublishResult() }
+    }
+    private val draftRetry = JButton("重试同步")
+    private var baseline = TopicDraftContent()
 
     private val backgroundTasks = com.lgguan.linuxdo.plugin.common.BackgroundTasks()
 
+    private val previewView by lazy { ComposerPreviewView(backgroundTasks, { isDisposed }) }
+    private val editorSupport by lazy {
+        ComposerEditorSupport(project, textArea, previewView, statusLabel, backgroundTasks, { isDisposed }, ::onContentChanged,
+            disposable, ::togglePreview, ::showPreview)
+    }
     private val titleField = JBTextField()
     private val titleCounterLabel = JBLabel("0 / 6")
 
-    private val categoryComboBox = ComboBox<CategoryItem>()
+    private val categoryComboBox = ComposerCategoryPicker()
 
     // Tags dynamic search components
     private val tagInputField = JBTextField(12)
-    private val addTagBtn = JButton("+").apply {
-        preferredSize = Dimension(JBUI.scale(26), JBUI.scale(26))
-        isFocusable = false
-        toolTipText = "添加标签"
+    private val tagSelectButton = JButton("选择标签（可选）  ▾").apply {
+        name = "composer-tag-picker"
+        horizontalAlignment = SwingConstants.LEFT
+        toolTipText = "搜索并选择标签"
+        accessibleContext.accessibleName = "选择标签"
     }
-    private val tagsPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 1)).apply {
+    private val tagPickerStatus = JBLabel()
+    private val tagsPanel = JPanel(ComposerWrapLayout()).apply {
         isVisible = false
         border = JBUI.Borders.empty(2, 0)
     }
     private val selectedTags = linkedSetOf<String>()
 
-    // Tag autocomplete popup without focus stealing
+    // Searchable tag checklist keeps multiple selections in the same popup.
     private val tagSuggestionsModel = DefaultListModel<TagItem>()
     private val tagSuggestionsList = JBList(tagSuggestionsModel)
     private var tagPopup: JBPopup? = null
     private val tagAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, disposable)
+    private val tagValidationAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, disposable)
 
     private val textArea = JBTextArea(14, 50)
     private val bodyCounterLabel = JBLabel("0 / 20 勿用各类字数补丁")
@@ -90,7 +158,7 @@ class CreateTopicDialog(
     private var previewPane: JEditorPane? = null
     private val previewAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, disposable)
     private val splitter = JBSplitter(false, 0.52f)
-    private var isPreviewVisible = true
+    private var isPreviewVisible = false
     private var previewContainer: JComponent? = null
 
     private val statusLabel = object : JBLabel("⚪ 就绪") {
@@ -103,27 +171,42 @@ class CreateTopicDialog(
         }
     }
 
-    data class CategoryItem(val id: Int?, val name: String, val slug: String?, val color: String?) {
-        override fun toString(): String = name
-    }
-
     init {
+        setModal(false)
         title = "创建话题 - Linux Do"
         setOKButtonText("创建话题")
         setCancelButtonText("舍弃")
         init()
         loadCategoriesAndTags()
-        LinuxDoAuthService.getInstance().addAuthListener(disposable) {
-            if (!isDisposed) { categoryComboBox.removeAllItems(); updateValidation(); loadCategoriesAndTags() }
+        environment.authListener(disposable) {
+            if (!isDisposed && draftSession.version != SessionEpoch.current) {
+                draftBlocked = true
+                draftAlarm.cancelAllRequests()
+                tagAlarm.cancelAllRequests()
+                tagValidationAlarm.cancelAllRequests()
+                tagPopup?.cancel()
+                categoryComboBox.hidePopup()
+                previewView.invalidate()
+                imageUpload.cancel()
+                draftStatus.text = "账号已切换，同步已停止；内容仅保留在此窗口"
+                updateValidation()
+            }
         }
+        draftRetry.addActionListener { if (draftSession.conflicted) resolveConflict() else if (!draftReady) loadDraft() else saveDraft() }
+        loadDraft()
         updateValidation()
         updatePreview()
+    }
+
+    override fun beforeShowCallback() {
+        super.beforeShowCallback()
+        window?.minimumSize = Dimension(320, 460)
     }
 
     override fun createCenterPanel(): JComponent {
         val rootPanel = JPanel(BorderLayout(0, 8))
         rootPanel.border = JBUI.Borders.empty(8)
-        rootPanel.preferredSize = Dimension(JBUI.scale(840), JBUI.scale(580))
+        rootPanel.preferredSize = Dimension(JBUI.scale(1040), JBUI.scale(700))
 
         val scheme = EditorColorsManager.getInstance().globalScheme
         val theme = EditorColorSchemeAdapter.getCurrentThemeColors()
@@ -166,81 +249,43 @@ class CreateTopicDialog(
         gbc.gridx = 1
         gbc.weightx = 0.55
         gbc.insets = JBUI.emptyInsets()
-        val tagInputContainer = JPanel(BorderLayout(4, 0))
-        tagInputField.emptyText.text = "搜索或输入标签 (按 Enter 添加)..."
-        tagInputField.preferredSize = Dimension(JBUI.scale(140), JBUI.scale(28))
-        tagInputContainer.add(tagInputField, BorderLayout.CENTER)
-        tagInputContainer.add(addTagBtn, BorderLayout.EAST)
-        catTagRow.add(tagInputContainer, gbc)
+        tagInputField.emptyText.text = "搜索标签…"
+        tagInputField.name = "composer-tag-search"
+        tagSelectButton.preferredSize = Dimension(JBUI.scale(140), JBUI.scale(28))
+        tagSelectButton.minimumSize = Dimension(0, JBUI.scale(28))
+        catTagRow.add(tagSelectButton, gbc)
 
         formPanel.add(catTagRow)
 
         // Preloaded / Recommended Quick Tags Panel
-        formPanel.add(createQuickTagsPanel())
+        formPanel.add(tagStatus)
 
         // Tags Chip Panel (Compact, visible only when tags exist)
-        formPanel.add(tagsPanel)
         formPanel.add(Box.createVerticalStrut(JBUI.scale(4)))
 
-        // Row 3: Flat ActionToolbar
-        val toolbar = createFormattingToolbar()
-        formPanel.add(toolbar)
-        formPanel.add(Box.createVerticalStrut(JBUI.scale(4)))
-
-        // 3. Editor & Live Preview (Splitter)
         textArea.font = editorFont
         textArea.lineWrap = true
         textArea.wrapStyleWord = true
         textArea.background = scheme.defaultBackground
         textArea.foreground = scheme.defaultForeground
-        textArea.emptyText.text = "在此处输入。使用 Markdown、BBCode 或 HTML 进行排版。拖放或粘贴图片以插入。"
+        textArea.emptyText.text = "输入正文，支持 Markdown；可拖放或粘贴图片。"
 
-        val editorPanel = JPanel(BorderLayout(0, 2))
-        val editorScroll = JBScrollPane(textArea).apply {
-            border = JBUI.Borders.customLine(JBColor.border())
-        }
-        editorPanel.add(editorScroll, BorderLayout.CENTER)
-
-        val editorFooter = JPanel(BorderLayout())
-        editorFooter.border = JBUI.Borders.empty(2, 4)
-        bodyCounterLabel.font = bodyCounterLabel.font.deriveFont(Font.BOLD, 11f)
-        bodyCounterLabel.foreground = JBColor(0xCF222E, 0xF85149)
-        editorFooter.add(bodyCounterLabel, BorderLayout.EAST)
-        editorPanel.add(editorFooter, BorderLayout.SOUTH)
+        val editorPanel = ComposerAppearance.editor(textArea, createFormattingToolbar(), bodyCounterLabel)
 
         // Setup live preview component (Styled JEditorPane matching IDE theme)
-        val pane = JEditorPane().apply {
-            contentType = "text/html"
-            isEditable = false
-            background = scheme.defaultBackground
-            foreground = scheme.defaultForeground
-            putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, true)
-            font = editorFont
-            val kit = HTMLEditorKit()
-            kit.styleSheet.addRule("body { font-family: ${theme.fontName}, -apple-system, sans-serif; font-size: ${theme.fontSize}pt; color: ${theme.fgHex}; background-color: ${theme.bgHex}; margin: 12px; line-height: 1.5; }")
-            kit.styleSheet.addRule("h1 { color: ${theme.fgHex}; font-size: 16pt; font-weight: bold; margin: 10px 0 6px 0; border-bottom: 1px solid ${theme.borderHex}; }")
-            kit.styleSheet.addRule("h2 { color: ${theme.fgHex}; font-size: 14pt; font-weight: bold; margin: 8px 0 4px 0; }")
-            kit.styleSheet.addRule("h3 { color: ${theme.fgHex}; font-size: 12pt; font-weight: bold; margin: 6px 0 2px 0; }")
-            kit.styleSheet.addRule("p, div, li, span { color: ${theme.fgHex}; font-size: ${theme.fontSize}pt; }")
-            kit.styleSheet.addRule("strong, b { color: ${theme.fgHex}; font-weight: bold; }")
-            kit.styleSheet.addRule("em, i { color: ${theme.fgHex}; font-style: italic; }")
-            kit.styleSheet.addRule("blockquote { color: ${theme.commentHex}; border-left: 3px solid #0969DA; margin-left: 0; padding-left: 8px; }")
-            kit.styleSheet.addRule("pre { background-color: ${theme.codeBlockBgHex}; color: ${theme.fgHex}; font-family: Consolas, monospace; font-size: 11pt; padding: 6px; }")
-            kit.styleSheet.addRule("code { background-color: ${theme.codeBlockBgHex}; color: ${theme.keywordHex}; font-family: Consolas, monospace; font-size: 11pt; }")
-            kit.styleSheet.addRule("a { color: #58A6FF; text-decoration: none; }")
-            kit.styleSheet.addRule("fieldset { border: 1px dashed ${theme.borderHex}; padding: 6px; margin: 6px 0; color: ${theme.fgHex}; }")
-            kit.styleSheet.addRule("legend { font-weight: bold; padding: 0 4px; color: ${theme.keywordHex}; }")
-            editorKit = kit
-        }
-        previewPane = pane
-        val previewScroll = JBScrollPane(pane).apply {
-            border = JBUI.Borders.customLine(JBColor.border())
-        }
+        previewPane = previewView.fallbackPane
+        val previewScroll = previewView.component
         previewContainer = previewScroll
 
         splitter.firstComponent = editorPanel
-        splitter.secondComponent = previewScroll
+        splitter.secondComponent = null
         splitter.setHonorComponentsMinimumSize(true)
+        splitter.addComponentListener(object : ComponentAdapter() {
+            override fun componentResized(e: ComponentEvent?) {
+                val vertical = splitter.width < JBUI.scale(620)
+                if (splitter.orientation != vertical) splitter.orientation = vertical
+            }
+        })
 
         val centerStack = JPanel(BorderLayout(0, 6))
         centerStack.add(formPanel, BorderLayout.NORTH)
@@ -280,105 +325,19 @@ class CreateTopicDialog(
             add(actionLink)
         }
 
-        banner.add(infoBox, BorderLayout.CENTER)
+        banner.add(infoBox, BorderLayout.NORTH)
+        banner.add(JPanel(BorderLayout()).apply {
+            add(draftStatus)
+            add(JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
+                add(draftRetry)
+                add(JButton("重新加载版块").apply { addActionListener { if (!publishing) loadCategoriesAndTags() } })
+            }, BorderLayout.EAST)
+            toolTipText = "仅同步至论坛，不在本机保存正文或标题；重启恢复依赖已同步草稿"
+        }, BorderLayout.SOUTH)
         return banner
     }
 
-    private fun createFormattingToolbar(): JComponent {
-        val toolbar = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0))
-        toolbar.border = JBUI.Borders.customLine(JBColor.border(), 0, 0, 1, 0)
-
-        fun makeFlatBtn(
-            icon: Icon? = null,
-            text: String? = null,
-            tooltip: String,
-            onClick: () -> Unit
-        ): JButton {
-            return JButton().apply {
-                if (icon != null) this.icon = icon
-                if (text != null) {
-                    this.text = text
-                    this.font = this.font.deriveFont(Font.BOLD, 12f)
-                }
-                toolTipText = tooltip
-                isFocusable = false
-                isBorderPainted = false
-                isContentAreaFilled = false
-                isOpaque = false
-                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                margin = JBUI.insets(2)
-                preferredSize = Dimension(JBUI.scale(28), JBUI.scale(26))
-                minimumSize = Dimension(JBUI.scale(28), JBUI.scale(26))
-                maximumSize = Dimension(JBUI.scale(28), JBUI.scale(26))
-                addMouseListener(object : MouseAdapter() {
-                    override fun mouseEntered(e: MouseEvent) {
-                        isContentAreaFilled = true
-                        background = JBColor(0xDFE1E5, 0x4E5157)
-                        repaint()
-                    }
-                    override fun mouseExited(e: MouseEvent) {
-                        isContentAreaFilled = false
-                        repaint()
-                    }
-                })
-                addActionListener { onClick() }
-            }
-        }
-
-        // Preview toggle
-        val previewBtn = makeFlatBtn(
-            icon = AllIcons.Actions.Preview,
-            tooltip = "切换实时预览分栏 (Toggle Live Preview)"
-        ) {
-            isPreviewVisible = !isPreviewVisible
-            splitter.secondComponent = if (isPreviewVisible) previewContainer else null
-            splitter.revalidate()
-            splitter.repaint()
-        }
-        toolbar.add(previewBtn)
-        toolbar.add(Box.createHorizontalStrut(JBUI.scale(6)))
-
-        val boldBtn = makeFlatBtn(text = "B", tooltip = "粗体 (**text**)") {
-            wrapSelection("**", "**", "粗体文本")
-        }.apply { font = font.deriveFont(Font.BOLD, 12f) }
-        toolbar.add(boldBtn)
-
-        val italicBtn = makeFlatBtn(text = "I", tooltip = "斜体 (*text*)") {
-            wrapSelection("*", "*", "斜体文本")
-        }.apply { font = font.deriveFont(Font.ITALIC or Font.BOLD, 12f) }
-        toolbar.add(italicBtn)
-
-        toolbar.add(makeFlatBtn(text = "H", tooltip = "标题 (### text)") {
-            prependToLines("### ")
-        })
-        toolbar.add(makeFlatBtn(icon = AllIcons.General.Web, tooltip = "插入超链接") {
-            insertLink()
-        })
-        toolbar.add(makeFlatBtn(text = "”", tooltip = "引用文本 (> text)") {
-            prependToLines("> ")
-        })
-        toolbar.add(makeFlatBtn(icon = AllIcons.FileTypes.Custom, tooltip = "代码块 (```code```)") {
-            insertCodeBlock()
-        })
-        toolbar.add(makeFlatBtn(icon = AllIcons.Actions.Upload, tooltip = "上传图片附件") {
-            chooseAndUploadImage()
-        })
-        toolbar.add(makeFlatBtn(icon = AllIcons.Actions.ListFiles, tooltip = "无序列表 (- item)") {
-            prependToLines("- ")
-        })
-        toolbar.add(makeFlatBtn(text = "1.", tooltip = "有序列表 (1. item)") {
-            prependToLines("1. ")
-        })
-        val emojiBtn = makeFlatBtn(icon = AllIcons.Actions.IntentionBulb, tooltip = "插入常用表情") {}
-        emojiBtn.addActionListener { showEmojiPopup(emojiBtn) }
-        toolbar.add(emojiBtn)
-
-        toolbar.add(makeFlatBtn(icon = AllIcons.General.CollapseComponent, tooltip = "折叠详情 (Details/Spoiler)") {
-            wrapSelection("[details=点击展开]\n", "\n[/details]", "在此输入隐藏内容")
-        })
-
-        return toolbar
-    }
+    private fun createFormattingToolbar(): JComponent = editorSupport.toolbar
 
     override fun createSouthPanel(): JComponent {
         val southPanel = JPanel(BorderLayout(16, 0)).apply {
@@ -390,6 +349,7 @@ class CreateTopicDialog(
             isOpaque = false
             maximumSize = Dimension(JBUI.scale(450), JBUI.scale(32))
             add(statusLabel)
+            add(publishCheck)
         }
         southPanel.add(statusContainer, BorderLayout.CENTER)
 
@@ -410,32 +370,40 @@ class CreateTopicDialog(
 
     private fun setupTagSuggestionsList() {
         tagSuggestionsList.selectionMode = ListSelectionModel.SINGLE_SELECTION
-        tagSuggestionsList.cellRenderer = object : DefaultListCellRenderer() {
+        tagSuggestionsList.fixedCellHeight = JBUI.scale(34)
+        tagSuggestionsList.cellRenderer = object : ListCellRenderer<TagItem> {
+            // CellRendererPane retains renderer components: allocate one row, not one per paint.
+            private val badge = JBLabel().apply { border = JBUI.Borders.empty(2, 6) }
+            private val count = JBLabel()
+            private val row = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), JBUI.scale(4))).apply {
+                border = JBUI.Borders.empty(0, 4)
+                add(badge); add(count)
+            }
             override fun getListCellRendererComponent(
-                list: JList<*>?,
-                value: Any?,
+                list: JList<out TagItem>,
+                value: TagItem,
                 index: Int,
                 isSelected: Boolean,
                 cellHasFocus: Boolean
             ): Component {
-                val label = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus) as JLabel
-                if (value is TagItem) {
-                    label.icon = AllIcons.Nodes.Tag
-                    label.text = if (value.count > 0) "#${value.text}  (${value.count} 话题)" else "#${value.text}"
-                    label.border = JBUI.Borders.empty(3, 6)
-                }
-                return label
+                row.background = if (isSelected) list.selectionBackground else list.background
+                badge.text = value.text
+                badge.isOpaque = true
+                badge.background = JBColor(0xEAEEF2, 0x34383D)
+                badge.foreground = list.foreground
+                badge.isEnabled = !value.disabled && selectedTags.size < capabilities.maxTags
+                count.text = if (value.disabled) value.title ?: "此板块不可用" else if (value.count > 0) "×${value.count}" else ""
+                count.foreground = if (isSelected) list.selectionForeground else UIUtil.getContextHelpForeground()
+                row.toolTipText = value.title ?: value.text
+                return row
             }
         }
 
         tagSuggestionsList.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
-                val selected = tagSuggestionsList.selectedValue
-                if (selected != null) {
-                    addTag(selected.text)
-                    tagInputField.text = ""
-                    tagPopup?.cancel()
-                    tagInputField.requestFocusInWindow()
+                val index = tagSuggestionsList.locationToIndex(e.point)
+                if (SwingUtilities.isLeftMouseButton(e) && index >= 0 && tagSuggestionsList.getCellBounds(index, index)?.contains(e.point) == true) {
+                    toggleTag(tagSuggestionsModel[index])
                 }
             }
         })
@@ -443,9 +411,9 @@ class CreateTopicDialog(
 
     private fun setupEventListeners() {
         titleField.document.addDocumentListener(object : DocumentListener {
-            override fun insertUpdate(e: DocumentEvent?) = updateValidation()
-            override fun removeUpdate(e: DocumentEvent?) = updateValidation()
-            override fun changedUpdate(e: DocumentEvent?) = updateValidation()
+            override fun insertUpdate(e: DocumentEvent?) = onContentChanged()
+            override fun removeUpdate(e: DocumentEvent?) = onContentChanged()
+            override fun changedUpdate(e: DocumentEvent?) = onContentChanged()
         })
         textArea.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent?) = onContentChanged()
@@ -454,7 +422,15 @@ class CreateTopicDialog(
         })
 
         categoryComboBox.addActionListener {
-            updateValidation()
+            if (!suppressDraft) {
+                categoryComboBox.hidePopup()
+                restoredCategory = null
+                val category = categories.firstOrNull { it.id == (categoryComboBox.selectedItem as? CategoryItem)?.id }
+                if (textArea.text.isBlank() && baseline.empty && category?.topicTemplate?.isNotBlank() == true) textArea.text = category.topicTemplate
+                validateSelectedTags()
+                scheduleTagSearch()
+                onContentChanged()
+            }
         }
 
         // Dynamic Tag Search with Alarm debounce
@@ -464,26 +440,9 @@ class CreateTopicDialog(
             override fun changedUpdate(e: DocumentEvent?) = scheduleTagSearch()
         })
 
-        // Tag input focus & mouse click: show preloaded system tags immediately!
-        tagInputField.addFocusListener(object : FocusAdapter() {
-            override fun focusGained(e: FocusEvent?) {
-                showAvailableSystemTags()
-            }
-        })
-        tagInputField.addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent?) {
-                showAvailableSystemTags()
-            }
-        })
-
-        tagInputField.addKeyListener(object : KeyAdapter() {
+        val tagKeys = object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
                 if (e.keyCode == KeyEvent.VK_DOWN) {
-                    if (tagPopup?.isVisible != true) {
-                        showAvailableSystemTags()
-                        e.consume()
-                        return
-                    }
                     if (tagSuggestionsModel.size() > 0) {
                         val next = (tagSuggestionsList.selectedIndex + 1).coerceAtMost(tagSuggestionsModel.size() - 1)
                         tagSuggestionsList.selectedIndex = next
@@ -497,27 +456,28 @@ class CreateTopicDialog(
                         tagSuggestionsList.ensureIndexIsVisible(prev)
                         e.consume()
                     }
-                } else if (e.keyCode == KeyEvent.VK_ENTER || e.keyChar == ',') {
+                } else if (e.keyCode == KeyEvent.VK_ENTER || (e.keyCode == KeyEvent.VK_SPACE && e.component === tagSuggestionsList)) {
                     if (tagPopup?.isVisible == true && tagSuggestionsList.selectedIndex >= 0) {
                         val selected = tagSuggestionsList.selectedValue
                         if (selected != null) {
-                            addTag(selected.text)
-                            tagInputField.text = ""
-                            tagPopup?.cancel()
+                            toggleTag(selected)
                             e.consume()
                             return
                         }
                     }
                     e.consume()
-                    addCurrentTag()
+                } else if (e.keyCode == KeyEvent.VK_BACK_SPACE && e.component === tagInputField && tagInputField.text.isEmpty()) {
+                    selectedTags.lastOrNull()?.let { removeTag(it) }
+                    e.consume()
                 } else if (e.keyCode == KeyEvent.VK_ESCAPE) {
                     tagPopup?.cancel()
                     e.consume()
                 }
             }
-        })
-
-        addTagBtn.addActionListener { addCurrentTag() }
+        }
+        tagInputField.addKeyListener(tagKeys)
+        tagSuggestionsList.addKeyListener(tagKeys)
+        tagSelectButton.addActionListener { if (tagPopup?.isVisible == true) tagPopup?.cancel() else showTagPopup() }
 
         // The IDE paste action is the sole keyboard paste handler, including custom keymaps.
         com.intellij.openapi.project.DumbAwareAction.create {
@@ -576,6 +536,7 @@ class CreateTopicDialog(
             }
 
             override fun importData(support: TransferSupport): Boolean {
+                if (!textArea.isEnabled) return false
                 if (handleTransferableImageImport(support.transferable)) {
                     return true
                 }
@@ -593,6 +554,7 @@ class CreateTopicDialog(
     }
 
     private fun pasteClipboardText() {
+        if (!textArea.isEnabled) return
         val text = try {
             CopyPasteManager.getInstance().getContents<String>(DataFlavor.stringFlavor)
                 ?: Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as? String
@@ -603,135 +565,165 @@ class CreateTopicDialog(
         }
     }
 
-    private fun scheduleTagSearch() {
+    private fun scheduleTagSearch(clearResults: Boolean = true) {
         tagAlarm.cancelAllRequests()
-        val query = tagInputField.text.trim()
-        if (query.isBlank()) {
-            tagPopup?.cancel()
-            return
-        }
-
+        val request = ++tagGeneration
+        if (tagPopup?.isVisible != true || draftSession.version != SessionEpoch.current) return
+        tagPickerStatus.text = "正在读取标签…"
+        if (clearResults) tagSuggestionsModel.clear()
         tagAlarm.addRequest({
-            if (!tagInputField.isShowing) return@addRequest
-            val currentQuery = tagInputField.text.trim()
-            if (currentQuery.isBlank()) {
-                tagPopup?.cancel()
-                return@addRequest
-            }
-
-            // Local match from popular tags
-            val popular = LinuxDoTopicService.getInstance().popularTags
-            val localMatches = popular.filter { it.contains(currentQuery, ignoreCase = true) }
-                .map { TagItem(it, it, 0) }
-
-            if (localMatches.isNotEmpty()) {
-                showTagSuggestions(localMatches.take(8))
-            }
-
-            // Remote match from Discourse
-            LinuxDoTopicService.getInstance().searchTags(currentQuery) { remoteTags ->
-                if (tagInputField.text.trim() == currentQuery) {
-                    val combined = (remoteTags + localMatches).distinctBy { it.text }
-                    if (combined.isNotEmpty()) {
-                        showTagSuggestions(combined.take(10))
-                    } else if (localMatches.isEmpty()) {
-                        tagPopup?.cancel()
+            val query = tagInputField.text.trim()
+            val category = (categoryComboBox.selectedItem as? CategoryItem)?.id
+            val selected = selectedTags.mapNotNull { tagMetadata[it]?.id }
+            val version = draftSession.version
+            backgroundTasks.submit {
+                val result = runCatching { environment.tags(query, category, selected) }
+                ApplicationManager.getApplication().invokeLater({
+                    if (isDisposed || tagPopup?.isVisible != true || request != tagGeneration || version != SessionEpoch.current || category != (categoryComboBox.selectedItem as? CategoryItem)?.id) return@invokeLater
+                    result.onSuccess { response ->
+                        tagPickerStatus.toolTipText = null
+                        response.results.forEach { tagMetadata[it.text] = it }
+                        response.requiredTagGroup?.let { tagStatus.text = "至少 ${it.minCount} 个「${it.name}」标签；发布时由论坛校验" }
+                        if (response.forbidden) tagStatus.text = response.forbiddenMessage ?: "此类别不允许这些标签"
+                        showTagSuggestions(response.results.distinctBy { it.text }.filter { it.text !in selectedTags })
+                        tagPickerStatus.text = when {
+                            response.forbidden -> response.forbiddenMessage ?: "此板块不允许这些标签"
+                            tagSuggestionsModel.isEmpty -> "没有匹配的标签；可修改搜索词"
+                            else -> "已选 ${selectedTags.size} / ${capabilities.maxTags}；点击添加，× 移除"
+                        }
+                    }.onFailure { error ->
+                        tagPickerStatus.text = tagFailureMessage(error)
+                        tagPickerStatus.toolTipText = ComposerErrors.parse(error)
                     }
-                }
+                }, ModalityState.any())
             }
-        }, 250)
+        }, 250, ModalityState.any())
     }
 
-    private fun createQuickTagsPanel(): JComponent {
-        val quickPanel = JPanel(FlowLayout(FlowLayout.LEFT, 6, 2)).apply {
-            border = JBUI.Borders.empty(1, 0, 3, 0)
-        }
-        val tip = JBLabel("推荐标签:").apply {
-            font = font.deriveFont(Font.PLAIN, 11f)
-            foreground = UIUtil.getContextHelpForeground()
-            border = JBUI.Borders.empty(0, 1, 0, 2)
-        }
-        quickPanel.add(tip)
-
-        val recommended = listOf("纯水", "快问快答", "软件开发", "人工智能", "VPS", "求资源", "配置优化", "经验分享", "网络安全", "树洞")
-        for (tag in recommended) {
-            val link = ActionLink("#$tag") {
-                if (selectedTags.contains(tag)) {
-                    selectedTags.remove(tag)
-                } else {
-                    addTag(tag)
+    private fun validateSelectedTags() {
+        tagValidationAlarm.cancelAllRequests()
+        val generation = ++tagValidationGeneration
+        val category = (categoryComboBox.selectedItem as? CategoryItem)?.id
+        val snapshot = selectedTags.toList()
+        val version = draftSession.version
+        invalidTags.clear()
+        if (version != SessionEpoch.current) { validatingTags = false; updateValidation(); return }
+        if (category == null || snapshot.isEmpty()) { validatingTags = false; updateValidation(); return }
+        validatingTags = true
+        updateValidation()
+        tagValidationAlarm.addRequest({ backgroundTasks.submit {
+            val result = runCatching {
+                snapshot.associateWith { name ->
+                    val response = environment.tags(name, category, emptyList())
+                    response.results.firstOrNull { it.text == name || it.name == name } ?: error("标签「$name」不可用")
+                }
+            }
+            ApplicationManager.getApplication().invokeLater({
+                if (isDisposed || generation != tagValidationGeneration || version != SessionEpoch.current || category != (categoryComboBox.selectedItem as? CategoryItem)?.id || snapshot != selectedTags.toList()) return@invokeLater
+                validatingTags = false
+                result.onSuccess { results ->
+                    tagStatus.toolTipText = null
+                    results.forEach { (name, tag) -> tagMetadata[name] = tag; if (tag.disabled) invalidTags[name] = tag.title ?: "不能用于此类别" }
+                    tagStatus.text = if (invalidTags.isEmpty()) "标签已按当前类别检查；必选组由论坛最终校验" else invalidTags.entries.joinToString("；") { "${it.key}：${it.value}" }
+                }.onFailure { error ->
+                    snapshot.forEach { invalidTags[it] = "尚未确认，请重试标签检查" }
+                    tagStatus.text = tagFailureMessage(error)
+                    tagStatus.toolTipText = ComposerErrors.parse(error)
                 }
                 renderTagChips()
+                tagSuggestionsList.repaint()
                 updateValidation()
-            }.apply {
-                font = font.deriveFont(Font.PLAIN, 11f)
-                toolTipText = "点击快速选择/取消标签 #$tag"
-            }
-            quickPanel.add(link)
-        }
-
-        val moreLink = ActionLink("全部系统标签...") {
-            tagInputField.text = ""
-            tagInputField.requestFocusInWindow()
-            showAvailableSystemTags()
-        }.apply {
-            font = font.deriveFont(Font.BOLD, 11f)
-            toolTipText = "浏览并选择所有常用系统标签"
-        }
-        quickPanel.add(moreLink)
-
-        return quickPanel
+            }, ModalityState.any())
+        } }, 250, ModalityState.any())
     }
 
-    private fun showAvailableSystemTags() {
-        if (!tagInputField.isShowing) return
-        val current = tagInputField.text.trim()
-        val allTags = (LinuxDoTopicService.getInstance().popularTags.ifEmpty {
-            LinuxDoTopicService.DEFAULT_SYSTEM_TAGS
-        } + LinuxDoTopicService.DEFAULT_SYSTEM_TAGS).distinct()
-
-        val unselected = allTags.filter { it !in selectedTags }
-        val filtered = if (current.isNotBlank()) {
-            unselected.filter { it.contains(current, ignoreCase = true) }
-        } else {
-            unselected
-        }
-
-        val items = filtered.take(15).map { TagItem(it, it, 0) }
-        showTagSuggestions(items)
+    private fun tagFailureMessage(error: Throwable) = when (error) {
+        is com.lgguan.linuxdo.plugin.net.CloudflareChallengeException -> "Cloudflare 人机验证后重试（侧边栏登录/验证）"
+        is com.lgguan.linuxdo.plugin.net.RateLimitException -> "论坛请求频率限制；冷却结束后重试"
+        else -> "标签读取失败；点击重试或修改搜索词"
     }
 
     private fun showTagSuggestions(items: List<TagItem>) {
-        if (items.isEmpty() || !tagInputField.isShowing) {
-            tagPopup?.cancel()
-            return
-        }
-
+        val previous = tagSuggestionsList.selectedValue?.text
         tagSuggestionsModel.clear()
-        items.forEach { tagSuggestionsModel.addElement(it) }
-        tagSuggestionsList.selectedIndex = -1
+        tagSuggestionsModel.addAll(items)
+        tagSuggestionsList.selectedIndex = items.indexOfFirst { it.text == previous }.takeIf { it >= 0 } ?: if (items.isEmpty()) -1 else 0
+    }
 
-        if (tagPopup?.isVisible == true) {
-            tagPopup?.pack(true, true)
-            return
+    private fun showTagPopup() {
+        if (!tagSelectButton.isEnabled || tagPopup?.isVisible == true || draftSession.version != SessionEpoch.current) return
+        tagSuggestionsModel.clear()
+        tagInputField.text = ""
+        tagPickerStatus.text = "正在读取标签…"
+        val popupWidth = tagSelectButton.width.coerceAtLeast(JBUI.scale(390))
+        tagsPanel.setSize(popupWidth, tagsPanel.height)
+        val content = object : JPanel(BorderLayout(0, 0)) {
+            override fun getPreferredSize(): Dimension = super.getPreferredSize().apply {
+                width = popupWidth + insets.left + insets.right
+            }
+        }.apply {
+            border = JBUI.Borders.empty(4)
+            add(JBScrollPane(tagSuggestionsList).apply {
+                border = JBUI.Borders.empty()
+                preferredSize = Dimension(popupWidth, JBUI.scale(240))
+            }, BorderLayout.CENTER)
+            add(JPanel(BorderLayout(0, 6)).apply {
+                border = JBUI.Borders.emptyTop(6)
+                add(tagsPanel, BorderLayout.NORTH)
+                add(tagInputField, BorderLayout.CENTER)
+                add(JPanel(BorderLayout(6, 0)).apply {
+                    add(tagPickerStatus, BorderLayout.CENTER)
+                    add(JButton("重试").apply { addActionListener { scheduleTagSearch(); validateSelectedTags() } }, BorderLayout.EAST)
+                }, BorderLayout.SOUTH)
+            }, BorderLayout.SOUTH)
         }
-
-        val scroll = JBScrollPane(tagSuggestionsList).apply {
-            border = JBUI.Borders.customLine(JBColor.border())
-            preferredSize = Dimension(tagInputField.width.coerceAtLeast(JBUI.scale(220)), JBUI.scale(150))
-        }
-
         val popup = JBPopupFactory.getInstance()
-            .createComponentPopupBuilder(scroll, null)
-            .setRequestFocus(false)
-            .setFocusable(false)
+            .createComponentPopupBuilder(content, tagInputField)
+            .setRequestFocus(true)
+            .setFocusable(true)
             .setResizable(false)
             .setMovable(false)
             .setCancelOnClickOutside(true)
             .createPopup()
 
         tagPopup = popup
-        popup.show(RelativePoint(tagInputField, Point(0, tagInputField.height)))
+        popup.addListener(object : JBPopupListener {
+            override fun onClosed(event: LightweightWindowEvent) {
+                if (tagPopup === popup) {
+                    tagPopup = null
+                    ++tagGeneration
+                    tagAlarm.cancelAllRequests()
+                }
+            }
+        })
+        popup.show(RelativePoint(tagSelectButton, Point(0, tagSelectButton.height)))
+        scheduleTagSearch()
+        if (invalidTags.isNotEmpty()) validateSelectedTags()
+    }
+
+    private fun toggleTag(tag: TagItem) {
+        if (!textArea.isEnabled) return
+        if (tag.text in selectedTags) removeTag(tag.text) else addTag(tag.text)
+        tagSuggestionsList.repaint()
+        if (tag.text in selectedTags) {
+            val index = (0 until tagSuggestionsModel.size()).firstOrNull { tagSuggestionsModel[it].text == tag.text }
+            if (index != null) tagSuggestionsModel.remove(index)
+        }
+        tagPickerStatus.text = if (tag.disabled && tag.text !in selectedTags) tag.title ?: "此板块不可用" else "已选 ${selectedTags.size} / ${capabilities.maxTags}；点击添加，× 移除"
+        tagPopup?.pack(false, true)
+        if (tag.text in selectedTags) scheduleTagSearch(clearResults = false)
+    }
+
+    private fun removeTag(tag: String) {
+        if (!textArea.isEnabled) return
+        selectedTags.remove(tag)
+        invalidTags.remove(tag)
+        validateSelectedTags()
+        onContentChanged()
+        renderTagChips()
+        tagSuggestionsList.repaint()
+        updateValidation()
+        if (tagPopup?.isVisible == true) scheduleTagSearch(clearResults = false)
     }
 
     private fun sanitizeTag(raw: String): String {
@@ -742,38 +734,34 @@ class CreateTopicDialog(
     }
 
     private fun addTag(rawTag: String) {
+        if (!textArea.isEnabled) return
         val clean = sanitizeTag(rawTag)
         if (clean.isNotBlank()) {
-            if (selectedTags.size >= 5) {
-                statusLabel.text = "⚠️ 最多只能添加 5 个标签"
+            if (selectedTags.size >= capabilities.maxTags) {
+                statusLabel.text = "⚠️ 最多只能添加 ${capabilities.maxTags} 个标签"
                 return
             }
             if (!selectedTags.contains(clean)) {
+                val tag = tagMetadata[clean]
+                if (tag?.disabled == true) { tagStatus.text = tag.title ?: "不能用于此类别"; return }
                 selectedTags.add(clean)
+                validateSelectedTags()
+                onContentChanged()
                 renderTagChips()
                 updateValidation()
             }
         }
     }
 
-    private fun addCurrentTag() {
-        val raw = tagInputField.text.trim()
-        if (raw.isNotBlank()) {
-            val tags = raw.split(Regex("[,，\\s]+"))
-            for (t in tags) {
-                addTag(t)
-            }
-            tagInputField.text = ""
-            tagPopup?.cancel()
-        }
-    }
-
     private fun renderTagChips() {
         tagsPanel.removeAll()
+        tagSelectButton.text = if (selectedTags.isEmpty()) "选择标签（可选） ▾" else selectedTags.joinToString("、") + " ▾"
+        tagSelectButton.toolTipText = if (selectedTags.isEmpty()) "搜索并选择标签" else selectedTags.joinToString("、")
         if (selectedTags.isEmpty()) {
             tagsPanel.isVisible = false
             tagsPanel.revalidate()
             tagsPanel.repaint()
+            tagPopup?.pack(false, true)
             return
         }
 
@@ -786,245 +774,116 @@ class CreateTopicDialog(
                     JBUI.Borders.empty(2, 6)
                 )
 
-                val tagLabel = JBLabel("#$tag", AllIcons.Nodes.Tag, SwingConstants.LEFT).apply {
+                val tagLabel = JBLabel(tag).apply {
                     font = font.deriveFont(Font.PLAIN, 11f)
                     foreground = JBColor(0x24292F, 0xC9D1D9)
                     border = JBUI.Borders.empty(0, 0, 0, 2)
                 }
 
-                val delLabel = JBLabel("×").apply {
+                val delLabel = JButton("×").apply {
+                    name = "composer-remove-tag-$tag"
+                    getAccessibleContext().accessibleName = "移除标签 $tag"
                     font = font.deriveFont(Font.BOLD, 12f)
                     foreground = JBColor(0x8C959F, 0x8B949E)
+                    margin = JBUI.emptyInsets()
+                    border = JBUI.Borders.empty(0, 1)
+                    preferredSize = Dimension(JBUI.scale(16), JBUI.scale(18))
+                    minimumSize = preferredSize
+                    isOpaque = false; isContentAreaFilled = false
                     cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                     toolTipText = "移除标签"
-                    addMouseListener(object : MouseAdapter() {
-                        override fun mouseEntered(e: MouseEvent?) {
-                            foreground = JBColor.RED
-                        }
-                        override fun mouseExited(e: MouseEvent?) {
-                            foreground = JBColor(0x8C959F, 0x8B949E)
-                        }
-                        override fun mouseClicked(e: MouseEvent?) {
-                            selectedTags.remove(tag)
-                            renderTagChips()
-                            updateValidation()
-                        }
-                    })
+                    isEnabled = textArea.isEnabled
+                    addActionListener { removeTag(tag) }
                 }
 
                 add(tagLabel, BorderLayout.CENTER)
-                add(delLabel, BorderLayout.EAST)
+                add(delLabel, BorderLayout.WEST)
             }
             tagsPanel.add(chip)
         }
         tagsPanel.revalidate()
         tagsPanel.repaint()
+        tagPopup?.pack(false, true)
     }
 
     private fun onContentChanged() {
         updateValidation()
         schedulePreviewUpdate()
+        if (!suppressDraft && draftReady && !draftBlocked && !draftSession.conflicted && !publishing && snapshot() != baseline) {
+            draftStatus.text = "尚未同步；停止输入 2 秒后保存"
+            draftAlarm.cancelAllRequests()
+            draftAlarm.addRequest({ saveDraft() }, 2000, ModalityState.any())
+        }
     }
-
+    private fun snapshot() = TopicDraftContent(titleField.text, textArea.text, (categoryComboBox.selectedItem as? CategoryItem)?.id ?: restoredCategory, selectedTags.toList())
+    private fun setEditable(enabled: Boolean) {
+        titleField.isEnabled = enabled; textArea.isEnabled = enabled; categoryComboBox.isEnabled = enabled
+        tagInputField.isEnabled = enabled; tagSelectButton.isEnabled = enabled; tagsPanel.isEnabled = enabled
+        tagsPanel.components.filterIsInstance<JPanel>().flatMap { it.components.toList() }.filterIsInstance<JButton>().forEach { it.isEnabled = enabled }
+        if (!enabled) tagPopup?.cancel()
+    }
     private fun updateValidation() {
         if (isDisposed) return
-        val titleText = titleField.text.trim()
-        val titleLen = titleText.length
-        val titleValid = titleLen >= 6
-
-        titleCounterLabel.text = "$titleLen / 6"
-        if (titleValid) {
-            titleCounterLabel.foreground = JBColor(0x1A7F37, 0x3FB950)
-        } else {
-            titleCounterLabel.foreground = JBColor(0xCF222E, 0xF85149)
-        }
-
-        val bodyText = textArea.text.trim()
-        val bodyLen = bodyText.length
-        val bodyValid = bodyLen >= 20
-
-        if (bodyValid) {
-            bodyCounterLabel.text = "$bodyLen 字符"
-            bodyCounterLabel.foreground = JBColor(0x57606A, 0x8B949E)
-        } else {
-            bodyCounterLabel.text = "$bodyLen / 20 勿用各类字数补丁"
-            bodyCounterLabel.foreground = JBColor(0xCF222E, 0xF85149)
-        }
-
-        val catItem = categoryComboBox.selectedItem as? CategoryItem
-        val catValid = catItem?.id != null && LinuxDoTopicService.getInstance().categoriesAreCurrent && LinuxDoAuthService.getInstance().isLoggedIn
-
-        val allValid = titleValid && bodyValid && catValid
-        isOKActionEnabled = allValid
-
-        if (!LinuxDoTopicService.getInstance().categoriesAreCurrent) {
-            statusLabel.text = "版块未加载成功，请点击「重新加载版块」；输入内容已保留"
-        } else if (!LinuxDoAuthService.getInstance().isLoggedIn) {
-            statusLabel.text = "请先确认登录账号，再发布话题"
-        } else if (!catValid) {
-            statusLabel.text = "⚪ 请选择发布版块"
-        } else if (!titleValid) {
-            statusLabel.text = "⚪ 标题至少需要 6 个字符 (当前: $titleLen)"
-        } else if (!bodyValid) {
-            statusLabel.text = "⚪ 正文至少需要 20 个字符 (当前: $bodyLen)"
-        } else {
-            statusLabel.text = "⚪ 就绪 (${PlatformShortcuts.submitLabel} 发布话题)"
+        publishCheck.isVisible = unconfirmed
+        val content = snapshot()
+        val category = categories.firstOrNull { it.id == content.categoryId }
+        val titleValid = capabilities.titleValid(content.title)
+        val bodyValid = capabilities.bodyValid(content.body, true)
+        titleCounterLabel.text = "${content.title.trim().length} / ${capabilities.minTitle}–${capabilities.maxTitle}"
+        bodyCounterLabel.text = "${content.body.trim().length} / ${capabilities.minTopicBody}–${capabilities.maxBody} 字符"
+        titleCounterLabel.foreground = if (titleValid) UIUtil.getContextHelpForeground() else JBColor.RED
+        bodyCounterLabel.foreground = if (bodyValid) UIUtil.getContextHelpForeground() else JBColor.RED
+        isOKActionEnabled = titleValid && bodyValid && categoriesReady && category?.permission == 1 && environment.loggedIn &&
+            content.tags.size in (category.minimumRequiredTags)..capabilities.maxTags && invalidTags.isEmpty() && !validatingTags &&
+            draftReady && !draftBusy && !draftBlocked && !draftSession.conflicted && !publishing && !unconfirmed &&
+            !capabilities.readOnly && imageUpload.pending == 0 && imageUpload.failures == 0 && draftSession.version == SessionEpoch.current
+        statusLabel.text = when {
+            publishing -> "正在提交，请等待结果"
+            unconfirmed -> "发布结果未确认，请先在网页检查"
+            imageUpload.failures > 0 -> "图片上传失败，请重试或舍弃失败图片"
+            imageUpload.pending > 0 -> "还有 ${imageUpload.pending} 张图片正在上传"
+            draftBlocked -> "同步已停止；输入内容已保留"
+            !categoriesReady -> "版块尚未加载，请重新加载"
+            category?.permission != 1 -> "请选择可发帖版块"
+            capabilities.readOnly -> "论坛当前限制发帖"
+            !titleValid -> "标题需要 ${capabilities.minTitle}–${capabilities.maxTitle} 个字符"
+            !bodyValid -> "正文需要 ${capabilities.minTopicBody}–${capabilities.maxBody} 个字符"
+            validatingTags -> "正在检查标签…"
+            invalidTags.isNotEmpty() -> "请修正不可用的标签"
+            else -> "${if (capabilities.confirmed) "就绪" else "论坛设置未确认，将由服务器校验"} (${PlatformShortcuts.submitLabel} 发布)"
         }
     }
-
     private fun loadCategoriesAndTags() {
-        categoryComboBox.removeAllItems()
-        isOKActionEnabled = false
-
-        // Always fetch dynamic categories from site in background and update combobox
-        LinuxDoTopicService.getInstance().loadCategories {
-            if (isDisposed) return@loadCategories
-            populateCategoryComboBox()
-            updateValidation()
+        categoriesReady = false
+        updateValidation()
+        val version = draftSession.version
+        backgroundTasks.submit {
+            val result = runCatching { environment.categories() to environment.capabilities() }
+            ApplicationManager.getApplication().invokeLater({
+                if (isDisposed || version != SessionEpoch.current) return@invokeLater
+                result.onSuccess { (loaded, rules) ->
+                    categories = ComposerCategories.flatten(loaded); capabilities = rules; categoriesReady = true
+                    populateCategoryComboBox()
+                    validateSelectedTags()
+                }.onFailure { statusLabel.text = "版块加载失败，请重试；内容已保留" }
+                updateValidation()
+            }, ModalityState.any())
         }
-
-        // Preload popular tags in background
-        LinuxDoTopicService.getInstance().loadPopularTags()
     }
-
     private fun populateCategoryComboBox() {
-        val service = LinuxDoTopicService.getInstance()
-        val settings = LinuxDoSettingsState.getInstance()
-        val prevSelectedId = (categoryComboBox.selectedItem as? CategoryItem)?.id ?: initialCategoryId
-
+        val previous = restoredCategory ?: (categoryComboBox.selectedItem as? CategoryItem)?.id ?: initialCategoryId ?: capabilities.defaultCategory
+        suppressDraft = true
         categoryComboBox.removeAllItems()
-        categoryComboBox.addItem(CategoryItem(null, "选择一个版块...", null, null))
-
-        val hierarchicalList = if (service.categoriesAreCurrent) service.getHierarchicalCategories() else emptyList()
-        var selectIndex = 0
-        for ((idx, hCat) in hierarchicalList.withIndex()) {
-            val cat = hCat.category
-            val parent = hCat.parent
-            val lockPrefix = if (cat.readRestricted == true) "🔒 " else ""
-            val displayName = if (settings.categoryNamespaceFormat) {
-                if (parent == null) {
-                    "$lockPrefix${NamespaceFormatter.format(cat.name, cat.slug)}"
-                } else {
-                    val parentFormatted = NamespaceFormatter.format(parent.name, parent.slug)
-                    "$lockPrefix$parentFormatted.${cat.slug}"
-                }
-            } else {
-                if (parent == null) {
-                    "$lockPrefix${cat.name}"
-                } else {
-                    "  └ $lockPrefix${cat.name}"
-                }
-            }
-            categoryComboBox.addItem(CategoryItem(cat.id, displayName, cat.slug, cat.color))
-            if (prevSelectedId != null && cat.id == prevSelectedId) {
-                selectIndex = idx + 1
-            }
-        }
-        categoryComboBox.selectedIndex = selectIndex
+        categoryComboBox.addItem(CategoryItem(null, "选择可发帖版块…", null, null))
+        ComposerCategories.options(categories).forEach(categoryComboBox::addItem)
+        val index = (0 until categoryComboBox.itemCount).firstOrNull { categoryComboBox.getItemAt(it).id == previous }
+        categoryComboBox.selectedIndex = index ?: 0
+        if (index == null && restoredCategory != null) tagStatus.text = "草稿原版块不可发帖，请选择其他版块"
+        if (index != null) restoredCategory = null
+        suppressDraft = false
     }
 
-    private fun wrapSelection(prefix: String, suffix: String = prefix, defaultPlaceholder: String = "") {
-        val start = textArea.selectionStart
-        val end = textArea.selectionEnd
-        val text = textArea.text
-        if (start != end) {
-            val selected = text.substring(start, end)
-            val replacement = "$prefix$selected$suffix"
-            textArea.replaceRange(replacement, start, end)
-            textArea.select(start + prefix.length, start + prefix.length + selected.length)
-        } else {
-            val replacement = "$prefix$defaultPlaceholder$suffix"
-            textArea.insert(replacement, start)
-            textArea.select(start + prefix.length, start + prefix.length + defaultPlaceholder.length)
-        }
-        textArea.requestFocusInWindow()
-        onContentChanged()
-    }
-
-    private fun prependToLines(prefix: String) {
-        val start = textArea.selectionStart
-        val end = textArea.selectionEnd
-        val text = textArea.text
-        val lineStart = text.lastIndexOf('\n', start - 1).let { if (it == -1) 0 else it + 1 }
-        val lineEnd = text.indexOf('\n', end).let { if (it == -1) text.length else it }
-        val selectedBlock = text.substring(lineStart, lineEnd)
-        val lines = selectedBlock.split('\n')
-        val newBlock = lines.joinToString("\n") { "$prefix$it" }
-        textArea.replaceRange(newBlock, lineStart, lineEnd)
-        textArea.select(lineStart, lineStart + newBlock.length)
-        textArea.requestFocusInWindow()
-        onContentChanged()
-    }
-
-    private fun insertLink() {
-        val start = textArea.selectionStart
-        val end = textArea.selectionEnd
-        val text = textArea.text
-        val selected = if (start != end) text.substring(start, end) else "链接文本"
-        val url = Messages.showInputDialog(project, "请输入链接 URL (http:// 或 https://):", "插入超链接", Messages.getQuestionIcon())
-        if (!url.isNullOrBlank()) {
-            val replacement = "[$selected]($url)"
-            if (start != end) {
-                textArea.replaceRange(replacement, start, end)
-            } else {
-                textArea.insert(replacement, start)
-            }
-            onContentChanged()
-        }
-    }
-
-    private fun insertCodeBlock() {
-        val start = textArea.selectionStart
-        val end = textArea.selectionEnd
-        val text = textArea.text
-        if (start != end && !text.substring(start, end).contains('\n')) {
-            wrapSelection("`", "`", "code")
-        } else {
-            wrapSelection("```\n", "\n```\n", "code block")
-        }
-    }
-
-    private fun showEmojiPopup(invoker: Component) {
-        val emojis = arrayOf("👍", "🎉", "🔥", "🚀", "💡", "❤️", "😂", "👏", "🤝", "☕", "👀", "✨")
-        val popup = JPopupMenu()
-        val grid = JPanel(GridLayout(3, 4, 4, 4)).apply {
-            border = JBUI.Borders.empty(4)
-        }
-        for (em in emojis) {
-            val btn = JButton(em).apply {
-                margin = JBUI.insets(2)
-                font = font.deriveFont(Font.PLAIN, 16f)
-                preferredSize = Dimension(JBUI.scale(32), JBUI.scale(32))
-                isBorderPainted = false
-                isContentAreaFilled = false
-                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                addActionListener {
-                    textArea.insert(em, textArea.caretPosition)
-                    popup.isVisible = false
-                    textArea.requestFocusInWindow()
-                    onContentChanged()
-                }
-            }
-            grid.add(btn)
-        }
-        popup.add(grid)
-        popup.show(invoker, 0, invoker.height)
-    }
-
-    private fun chooseAndUploadImage() {
-        val descriptor = FileChooserDescriptor(true, false, false, false, false, false).apply {
-            title = "选择要插入的图片"
-            description = "支持 PNG, JPG, JPEG, GIF, WebP 等常见格式"
-            withFileFilter { file ->
-                val ext = file.extension?.lowercase()
-                ext in listOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "svg")
-            }
-        }
-
-        val chosen = FileChooser.chooseFile(descriptor, project, null) ?: return
-        val file = File(chosen.path)
-        doUploadImageFile(file)
-    }
+    private fun chooseAndUploadImage() = editorSupport.chooseImage()
 
     private fun handleClipboardImagePaste(): Boolean {
         // 1. Try AWT System Clipboard FIRST (Direct OS Windows clipboard, essential for Snipping Tool & WeChat screenshots)
@@ -1052,6 +911,7 @@ class CreateTopicDialog(
     }
 
     private fun handleTransferableImageImport(transferable: Transferable): Boolean {
+        if (!textArea.isEnabled) return false
         // 1. Direct Image Bitmap (e.g. Screenshot, Snipping Tool, WeChat/QQ screenshot, browser copy image)
         if (transferable.isDataFlavorSupported(DataFlavor.imageFlavor)) {
             val rawImg = try {
@@ -1151,9 +1011,7 @@ class CreateTopicDialog(
         return false
     }
 
-    private val imageUpload by lazy {
-        ComposerImageUpload(project, textArea, statusLabel, backgroundTasks, { isDisposed }, ::onContentChanged)
-    }
+    private val imageUpload get() = editorSupport.upload
 
     private fun uploadImageBytesInternal(bytes: ByteArray, fileName: String) = imageUpload.bytes(bytes, fileName)
 
@@ -1166,140 +1024,223 @@ class CreateTopicDialog(
         return ext in listOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "svg")
     }
 
-    private fun updatePreview() {
-        val pane = previewPane ?: return
-        val rawBody = textArea.text
-        val html = ComposerPreview.render(rawBody, ::schedulePreviewUpdate)
-        pane.text = html
-        pane.caretPosition = 0
+    private fun showPreview() {
+        if (isDisposed) return
+        isPreviewVisible = true
+        splitter.secondComponent = previewContainer
+        splitter.revalidate()
     }
 
+    private fun togglePreview(): Boolean {
+        previewAlarm.cancelAllRequests()
+        previewView.invalidate()
+        if (isPreviewVisible) {
+            isPreviewVisible = false
+            splitter.secondComponent = null
+            splitter.revalidate()
+        } else {
+            showPreview()
+            updatePreview()
+        }
+        return isPreviewVisible
+    }
+
+    private fun updatePreview() { if (!isDisposed && isPreviewVisible) previewView.local(textArea.text) }
+
     private fun schedulePreviewUpdate() {
-        if (isDisposed) return
+        if (isDisposed || !isPreviewVisible) return
+        previewView.invalidate()
         previewAlarm.cancelAllRequests()
         previewAlarm.addRequest({
             updatePreview()
-        }, 80, ModalityState.any())
+        }, 150, ModalityState.any())
     }
 
-    override fun doCancelAction() {
-        val hasContent = titleField.text.isNotBlank() || textArea.text.isNotBlank()
-        if (hasContent) {
-            val choice = Messages.showYesNoDialog(
-                project,
-                "当前话题尚未发布，确定要舍弃已输入的内容吗？",
-                "确认舍弃",
-                Messages.getQuestionIcon()
-            )
-            if (choice != Messages.YES) {
-                return
+    private fun <T> draftWork(work: () -> T, complete: (T) -> Unit) {
+        if (draftBusy || draftBlocked || draftSession.version != SessionEpoch.current) return
+        draftBusy = true; draftRetry.isVisible = false; updateValidation()
+        backgroundTasks.submit {
+            val result = runCatching(work)
+            ApplicationManager.getApplication().invokeLater({
+                if (isDisposed) return@invokeLater
+                draftBusy = false
+                if (draftSession.version != SessionEpoch.current) { draftBlocked = true; pendingAction = null; updateValidation(); return@invokeLater }
+                result.onSuccess {
+                    complete(it)
+                    val action = pendingAction; pendingAction = null; action?.invoke()
+                }.onFailure {
+                    pendingAction = null
+                    setEditable(true)
+                    val verification = it is com.lgguan.linuxdo.plugin.net.CloudflareChallengeException
+                    draftStatus.text = when {
+                        draftSession.conflicted -> "草稿冲突，自动同步已暂停"
+                        verification -> "请在侧边栏完成 Cloudflare 人机验证；内容已保留"
+                        else -> "同步失败，内容已保留在窗口"
+                    }
+                    draftStatus.toolTipText = it.message
+                    draftRetry.text = if (draftSession.conflicted) "选择版本" else if (verification) "验证后重试" else "重试同步"
+                    draftRetry.isVisible = true
+                }
+                updateValidation()
+            }, ModalityState.any())
+        }
+    }
+    private fun restore(content: TopicDraftContent) {
+        suppressDraft = true
+        titleField.text = content.title
+        textArea.text = content.body
+        textArea.caretPosition = textArea.text.length
+        selectedTags.clear(); selectedTags.addAll(content.tags)
+        restoredCategory = content.categoryId
+        if (categoriesReady) populateCategoryComboBox()
+        suppressDraft = true
+        renderTagChips()
+        suppressDraft = false
+        editorSupport.resetUndo()
+        baseline = snapshot()
+        validateSelectedTags()
+        schedulePreviewUpdate()
+    }
+    private fun loadDraft() {
+        setEditable(false)
+        draftStatus.text = "正在读取论坛草稿…"
+        draftWork({ draftSession.load() }) { draft ->
+            if (!draft.isTopicDraft) {
+                draftBlocked = true; setEditable(true)
+                draftStatus.text = "此草稿类型请在网页继续，插件不会改写"
+                draftRetry.text = "在网页打开"; draftRetry.isVisible = true
+                draftRetry.actionListeners.forEach { draftRetry.removeActionListener(it) }
+                draftRetry.addActionListener { BrowserUtil.browse("${DiscourseApiClient.getBaseUrl()}/my/activity/drafts") }
+            } else {
+                if (draft.data != null) restore(TopicDraftContent.read(draft)) else baseline = snapshot()
+                draftReady = true; setEditable(true)
+                draftStatus.text = if (draft.data != null) "已恢复论坛新话题草稿" else "尚无论坛草稿"
             }
         }
-        super.doCancelAction()
     }
-
-    override fun createActions(): Array<javax.swing.Action> = arrayOf(
-        object : javax.swing.AbstractAction("重新加载版块") {
-            override fun actionPerformed(e: java.awt.event.ActionEvent?) { loadCategoriesAndTags() }
-        }, *super.createActions())
+    private fun saveDraft(after: (() -> Unit)? = null) {
+        draftAlarm.cancelAllRequests()
+        if (draftBusy) { if (after != null) pendingAction = { saveDraft(after) }; return }
+        if (!draftReady || draftBlocked || draftSession.conflicted || publishing) return
+        if (imageUpload.pending > 0) { imageUpload.whenIdle { saveDraft(after) }; return }
+        val content = snapshot()
+        if (content == baseline || (content.empty && baseline.empty)) { after?.invoke(); return }
+        draftStatus.text = "正在同步论坛草稿…"
+        draftWork({ draftSession.save(content::write) }) {
+            baseline = content
+            if (content == snapshot()) { draftStatus.text = "已同步到论坛"; after?.invoke() }
+            else { draftStatus.text = "尚有未同步修改"; draftAlarm.addRequest({ saveDraft(after) }, 2000, ModalityState.any()) }
+        }
+    }
+    private fun describe(content: TopicDraftContent): String =
+        "标题：${content.title}\n版块：${categories.firstOrNull { it.id == content.categoryId }?.name ?: content.categoryId}\n标签：${content.tags.joinToString()}\n\n${content.body}"
+    private fun resolveConflict() {
+        draftAlarm.cancelAllRequests()
+        val local = snapshot()
+        draftWork({ draftSession.load() }) { server ->
+            if (!server.isTopicDraft) { draftBlocked = true; draftStatus.text = "服务器草稿类型已改变，请在网页继续"; return@draftWork }
+            val dialog = TopicDraftConflictDialog(project, describe(local), describe(TopicDraftContent.read(server)))
+            dialog.show()
+            when (dialog.exitCode) {
+                TopicDraftConflictDialog.LOCAL -> {
+                    draftSession.choose(server)
+                    baseline = TopicDraftContent.read(server)
+                    pendingAction = { saveDraft() }
+                }
+                TopicDraftConflictDialog.SERVER -> { draftSession.choose(server); restore(TopicDraftContent.read(server)); draftStatus.text = "已采用服务器版本" }
+                else -> { draftStatus.text = "冲突未解决，自动同步仍暂停"; draftRetry.isVisible = true }
+            }
+        }
+    }
+    override fun doCancelAction() {
+        if (publishing) { statusLabel.text = "正在提交，请等待结果"; return }
+        if (draftBlocked || unconfirmed) {
+            if (Messages.showYesNoDialog(project, "本机未保存正文或标题，关闭将舍弃窗口内容；论坛草稿保留。", "关闭话题窗口", Messages.getQuestionIcon()) == Messages.YES) super.doCancelAction()
+            return
+        }
+        if (draftBusy) { pendingAction = { doCancelAction() }; draftStatus.text = "正在等待当前草稿请求结束…"; return }
+        val choice = Messages.showDialog(project, "重启恢复依赖已同步的论坛草稿。本机不保存正文或标题。", "关闭话题窗口",
+            arrayOf("保存草稿并关闭", "舍弃草稿", "继续编辑"), 2, Messages.getQuestionIcon())
+        when (choice) {
+            0 -> {
+                if (draftSession.conflicted) { resolveConflict(); return }
+                if (!draftReady) { loadDraft(); return }
+                if (imageUpload.pending > 0) {
+                    draftStatus.text = "正在等待图片上传完成后保存…"
+                    // Upload must remain allowed to insert its captured result, but freeze user edits.
+                    setEditable(false)
+                    imageUpload.whenIdle {
+                        if (imageUpload.failures == 0) saveDraft { close(CANCEL_EXIT_CODE) }
+                        else { setEditable(true); draftStatus.text = "图片上传失败，请重试或舍弃失败图片；窗口内容已保留" }
+                    }
+                } else { setEditable(false); saveDraft { close(CANCEL_EXIT_CODE) } }
+            }
+            1 -> {
+                if (draftSession.conflicted) { resolveConflict(); return }
+                if (!draftReady) { loadDraft(); return }
+                imageUpload.cancel(); draftAlarm.cancelAllRequests(); setEditable(false)
+                draftWork({ draftSession.clearOwned() }) { cleanup ->
+                    if (cleanup == ForumDraftSession.Cleanup.OTHER_CLIENT) Messages.showInfoMessage(project, "其他客户端的新草稿已保留。", "草稿已保留")
+                    close(CANCEL_EXIT_CODE)
+                }
+            }
+        }
+    }
+    private fun checkPublishResult() {
+        com.intellij.ide.BrowserUtil.browse("${DiscourseApiClient.getBaseUrl()}/my/activity")
+        if (unconfirmed && Messages.showYesNoDialog(project,
+            "请先检查网页版。如果已确认没有发布或进入审核，可解除发送限制。是否已经确认？", "确认发布结果", Messages.getQuestionIcon()) == Messages.YES) {
+            unconfirmed = false; updateValidation()
+        }
+    }
 
     override fun doOKAction() {
-        val session = SessionEpoch.current
-        if (!com.lgguan.linuxdo.plugin.service.LinuxDoAuthService.getInstance().isLoggedIn) {
-            statusLabel.text = "请先完成登录验证，内容已保留"
-            return
-        }
-        val titleText = titleField.text.trim()
-        val rawContent = textArea.text.trim()
-        val catItem = categoryComboBox.selectedItem as? CategoryItem
-        val categoryId = catItem?.id
-
-        if (categoryId == null || !LinuxDoTopicService.getInstance().categoriesAreCurrent) {
-            statusLabel.text = "❌ 请选择发布版块"
-            return
-        }
-        if (titleText.length < 6) {
-            statusLabel.text = "❌ 标题至少需要 6 个字符"
-            return
-        }
-        if (rawContent.length < 20) {
-            statusLabel.text = "❌ 正文至少需要 20 个字符 (Discourse 论坛规范)"
-            return
-        }
-
-        statusLabel.text = "⏳ 正在发布话题并同步至社区..."
-        isOKActionEnabled = false
-        titleField.isEnabled = false
-        textArea.isEnabled = false
-        categoryComboBox.isEnabled = false
-
-        val tagsList = selectedTags.toList()
-
+        updateValidation()
+        if (!isOKActionEnabled) return
+        val content = snapshot()
+        val version = draftSession.version
+        publishing = true; draftBusy = true
+        draftAlarm.cancelAllRequests(); setEditable(false); updateValidation()
         backgroundTasks.submit {
-            try {
-                LinuxDoLog.info("Submitting new topic: categoryId=$categoryId")
-                val result = DiscourseApiClient.createTopic(titleText, rawContent, categoryId, tagsList, expectedVersion = session)
-
-                ApplicationManager.getApplication().invokeLater({
-                    if (isDisposed || rejectChangedSession(session)) return@invokeLater
-                    result.onSuccess { post ->
-                        LinuxDoLog.info("Topic successfully posted: id=${post.topicId ?: post.id}")
-                        statusLabel.text = "🟢 话题发布成功！正在跳转..."
-                        onTopicCreated?.invoke(post)
-
-                        val finalTopicId = post.topicId ?: post.id
-                        if (finalTopicId > 0) {
-                            LinuxDoEditorOpener.openTopic(project, finalTopicId, titleText)
-                        }
-
-                        close(OK_EXIT_CODE)
-                    }.onFailure { err ->
-                        isOKActionEnabled = true
-                        titleField.isEnabled = true
-                        textArea.isEnabled = true
-                        categoryComboBox.isEnabled = true
-                        LinuxDoLog.warn("Failed to create topic: ${err.message}", err)
-                        val errorMsg = ComposerErrors.parse(err.message)
-                        val shortError = if (errorMsg.length > 36) errorMsg.take(36) + "..." else errorMsg
-                        statusLabel.text = "🔴 发布失败: $shortError"
-                        statusLabel.toolTipText = errorMsg
-                        val formattedError = ComposerErrors.format(errorMsg)
-                        Messages.showErrorDialog(project, "发布话题失败:\n$formattedError", "创建话题失败")
+            val result = runCatching { draftSession.publish(content::write) { environment.publish(content, draftSession.key, version) } }
+            ApplicationManager.getApplication().invokeLater({
+                if (isDisposed) return@invokeLater
+                publishing = false; draftBusy = false
+                if (version != SessionEpoch.current) { draftBlocked = true; setEditable(true); updateValidation(); return@invokeLater }
+                result.onSuccess { (outcome, cleanup) ->
+                    if (cleanup.isFailure || cleanup.getOrNull() == ForumDraftSession.Cleanup.OTHER_CLIENT)
+                        Messages.showInfoMessage(project, "提交已确认；服务器草稿未清理或已由其他客户端修改，请在网页检查。", "提交已确认")
+                    close(OK_EXIT_CODE)
+                    when (outcome) {
+                        is PublishOutcome.Published -> runCatching {
+                            onTopicCreated?.invoke(outcome.post)
+                            LinuxDoEditorOpener.openTopic(project, requireNotNull(outcome.post.topicId), content.title)
+                        }.onFailure { LinuxDoLog.warn("Topic published but navigation failed: ${it.javaClass.simpleName}") }
+                        is PublishOutcome.Queued -> Messages.showInfoMessage(project, outcome.message, "已提交，等待审核")
                     }
-                }, com.intellij.openapi.application.ModalityState.any())
-            } catch (t: Throwable) {
-                ApplicationManager.getApplication().invokeLater({
-                    if (isDisposed || rejectChangedSession(session)) return@invokeLater
-                    isOKActionEnabled = true
-                    titleField.isEnabled = true
-                    textArea.isEnabled = true
-                    categoryComboBox.isEnabled = true
-                    LinuxDoLog.error("Exception in create topic", t)
-                    val errorMsg = t.message ?: "未知异常"
-                    val shortError = if (errorMsg.length > 36) errorMsg.take(36) + "..." else errorMsg
-                    statusLabel.text = "🔴 异常: $shortError"
-                    statusLabel.toolTipText = errorMsg
-                    val formattedError = ComposerErrors.format(errorMsg)
-                    Messages.showErrorDialog(project, "发布话题异常:\n$formattedError", "异常")
-                }, com.intellij.openapi.application.ModalityState.any())
-            }
+                }.onFailure { error ->
+                    setEditable(true)
+                    unconfirmed = error is UnconfirmedPublishException
+                    draftRetry.isVisible = true
+                    draftRetry.text = if (draftSession.conflicted) "选择版本" else "重试同步"
+                    updateValidation()
+                    statusLabel.text = ComposerErrors.parse(error)
+                    Messages.showErrorDialog(project, ComposerErrors.format(ComposerErrors.parse(error)), if (unconfirmed) "发布结果未确认" else "提交失败，内容已保留")
+                }
+            }, ModalityState.any())
         }
-    }
-
-    private fun rejectChangedSession(session: Long): Boolean {
-        if (session == SessionEpoch.current) return false
-        textArea.isEnabled = true
-        titleField.isEnabled = true
-        categoryComboBox.isEnabled = true
-        isOKActionEnabled = false
-        statusLabel.text = "账号已切换，内容已保留；请确认账号后再提交"
-        return true
     }
 
     override fun dispose() {
+        registryKey?.let { if (editors[it] === this) editors.remove(it) }
+        draftAlarm.cancelAllRequests()
+        imageUpload.cancel()
+        previewView.dispose()
         backgroundTasks.dispose()
         previewAlarm.cancelAllRequests()
         tagAlarm.cancelAllRequests()
+        tagValidationAlarm.cancelAllRequests()
+        categoryComboBox.hidePopup()
         tagPopup?.cancel()
         tagPopup = null
         super.dispose()

@@ -131,6 +131,10 @@ def host(args):
             archive.write(file, file.relative_to(classes).as_posix())
     report = output / "result.txt"
     vm_args = [arg.replace("%IDE_HOME%", str(home)) for arg in launch["additionalJvmArguments"]]
+    if getattr(args, "forum_preview", False):
+        vm_args.append("-Dlinuxdo.preview.live=true")
+    if getattr(args, "showcase", False):
+        vm_args.append("-Dlinuxdo.showcase=true")
     if getattr(args, "draft_bridge", None):
         vm_args.append(f"-Dlinuxdo.draft.bridge={Path(args.draft_bridge).resolve()}")
     if args.native:
@@ -162,6 +166,8 @@ def main():
             sub.add_argument("--plugin-zip")
             sub.add_argument("--native", action="store_true")
         if mode == "ui":
+            sub.add_argument("--showcase", action="store_true", help="Capture current production UI with sample data for README and Marketplace")
+            sub.add_argument("--forum-preview", action="store_true", help="Read-only live forum front-end preview check; no draft or post writes")
             sub.add_argument("--draft-bridge", help="Authorized draft-only browser handoff directory")
     args = parser.parse_args()
     args.ui = args.mode == "ui"

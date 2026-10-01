@@ -26,7 +26,9 @@ data class Category(
     @SerializedName("subcategory_list") val subcategoryList: List<Category>? = null,
     @SerializedName("subcategories") val subcategories: List<Category>? = null,
     @SerializedName("read_restricted") val readRestricted: Boolean? = false,
-    @SerializedName("permission") val permission: Int? = null
+    @SerializedName("permission") val permission: Int? = null,
+    @SerializedName("topic_template") val topicTemplate: String? = null,
+    @SerializedName("minimum_required_tags") val minimumRequiredTags: Int = 0
 )
 
 data class TopicListResponse(
@@ -304,9 +306,18 @@ data class TagListResponse(
 data class TagItem(
     @SerializedName("id") val id: String,
     @SerializedName("text") val text: String,
-    @SerializedName("count") val count: Int = 0
+    @SerializedName("count") val count: Int = 0,
+    @SerializedName("name") val name: String? = null,
+    @SerializedName("slug") val slug: String? = null,
+    @SerializedName("disabled") val disabled: Boolean = false,
+    @SerializedName("title") val title: String? = null
 )
 
 data class TagSearchResultResponse(
-    @SerializedName("results") val results: List<TagItem> = emptyList()
+    @SerializedName("results") val results: List<TagItem> = emptyList(),
+    @SerializedName("required_tag_group") val requiredTagGroup: RequiredTagGroup? = null,
+    @SerializedName("forbidden") val forbidden: Boolean = false,
+    @SerializedName("forbidden_message") val forbiddenMessage: String? = null
 )
+
+data class RequiredTagGroup(@SerializedName("name") val name: String = "", @SerializedName("min_count") val minCount: Int = 0)

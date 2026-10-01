@@ -235,8 +235,8 @@ class NotificationListPanel(
             val min = (remainingSec + 59) / 60
             Messages.showWarningDialog(
                 this,
-                "当前处于安全熔断保护中 (还剩约 $min 分钟)。\n已自动暂停向论坛发送请求，防止高频访问导致账号被风控。\n冷却结束后将自动恢复正常。",
-                "安全熔断保护 (HTTP 429)"
+                "通知请求正在冷却中 (还剩约 $min 分钟)。\n冷却结束后自动恢复轮询。",
+                "通知请求已暂停"
             )
             return
         }
@@ -257,8 +257,8 @@ class NotificationListPanel(
             val min = (remainingSec + 59) / 60
             Messages.showWarningDialog(
                 this,
-                "当前处于安全熔断保护中 (还剩约 $min 分钟)。\n已自动暂停向论坛发送请求，防止高频访问导致账号被风控。\n冷却结束后将自动恢复正常。",
-                "安全熔断保护 (HTTP 429)"
+                "通知请求正在冷却中 (还剩约 $min 分钟)。\n冷却结束后自动恢复轮询。",
+                "通知请求已暂停"
             )
             return
         }

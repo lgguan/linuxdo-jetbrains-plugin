@@ -24,7 +24,9 @@ class ComposerSupportTest {
     @Test
     fun `server validation errors and rate limit responses share readable messages`() {
         assertEquals("标题太短; 请选择分类", ComposerErrors.parse("HTTP 422: {\"errors\":[\"标题太短\",\"请选择分类\"]}"))
-        assertTrue(ComposerErrors.parse("HTTP 429").contains("稍后重试"))
+        assertTrue(ComposerErrors.parse("HTTP 429").contains("冷却结束后重试"))
+        assertTrue(ComposerErrors.parse("HTTP 429: Cloudflare Too Many Requests").contains("人机验证"))
+        assertFalse(ComposerErrors.parse("HTTP 429").contains("发言"))
         assertTrue(ComposerErrors.parse("Just a moment").contains("验证"))
         assertEquals("未知错误", ComposerErrors.parse(null))
     }

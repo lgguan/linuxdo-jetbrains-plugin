@@ -38,13 +38,12 @@ class CreateTopicAction : AnAction() {
     }
 
     private fun openCreateDialog(project: com.intellij.openapi.project.Project) {
-        val dialog = CreateTopicDialog(project) {
+        CreateTopicDialog.open(project) {
             val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(Constants.TOOL_WINDOW_ID)
             val content = toolWindow?.contentManager?.contents?.firstOrNull()
             val mainPanel = content?.component as? LinuxDoDocMainPanel
             mainPanel?.refreshAll()
         }
-        dialog.show()
     }
 
     override fun getActionUpdateThread(): ActionUpdateThread {

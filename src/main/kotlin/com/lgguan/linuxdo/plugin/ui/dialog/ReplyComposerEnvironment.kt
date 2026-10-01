@@ -13,7 +13,16 @@ internal interface ReplyComposerEnvironment {
     fun createReply(topicId: Long, body: String, floor: Int?, version: Long): Post
 }
 
-internal object ForumReplyComposerEnvironment : ReplyComposerEnvironment {
+/** Separate extension keeps existing embedded/test environments binary compatible. */
+internal interface ReplyPublishEnvironment : ReplyComposerEnvironment {
+    fun capabilities(): com.lgguan.linuxdo.plugin.model.ComposerCapabilities
+    fun publishReply(topicId: Long, body: String, floor: Int?, version: Long, key: String): com.lgguan.linuxdo.plugin.model.PublishOutcome
+}
+
+internal object ForumReplyComposerEnvironment : ReplyPublishEnvironment {
+    override fun capabilities() = DiscourseApiClient.composerCapabilities().getOrElse { com.lgguan.linuxdo.plugin.model.ComposerCapabilities() }
+    override fun publishReply(topicId: Long, body: String, floor: Int?, version: Long, key: String) =
+        DiscourseApiClient.publishReply(topicId, body, floor, version, key).getOrThrow()
     override val isLoggedIn: Boolean get() = LinuxDoAuthService.getInstance().isLoggedIn
     override fun addAuthListener(owner: Disposable, changed: () -> Unit) =
         LinuxDoAuthService.getInstance().addAuthListener(owner) { changed() }

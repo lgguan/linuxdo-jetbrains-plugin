@@ -225,7 +225,7 @@ class IssueListPanel(
                 return "论坛开启了安全防护。\n无需登录账号，仅需在验证窗口完成人机验证即可浏览公开话题。"
             }
             if (raw.contains("429") || raw.contains("Too Many Requests", ignoreCase = true)) {
-                return "论坛访问过于频繁 (HTTP 429)，已触发防风控安全熔断保护。\n请稍候片刻再点击重试。"
+                return "已触发论坛请求频率限制 (HTTP 429)。\n请等待冷却结束后再重试。"
             }
             if (raw.contains("404") || raw.contains("not_found", ignoreCase = true)) {
                 return "所选分类或请求的内容未找到 (HTTP 404)。\n建议切换至全部版块，或点击“重试刷新”重新加载分类列表。"
@@ -713,13 +713,12 @@ class IssueListPanel(
         }
 
         val selectedCat = (categoryComboBox.selectedItem as? CategoryItem)?.id
-        val dialog = com.lgguan.linuxdo.plugin.ui.dialog.CreateTopicDialog(
+        com.lgguan.linuxdo.plugin.ui.dialog.CreateTopicDialog.open(
             project = project,
             initialCategoryId = selectedCat
         ) {
             refreshList()
         }
-        dialog.show()
     }
 
     private fun updateAuthDisplay() {

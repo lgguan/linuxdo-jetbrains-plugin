@@ -34,6 +34,9 @@ python tools/smoke.py host --ide-home '/path/to/IDE' --plugin-zip build/distribu
 
 # 真实 IDE 桌面交互：回复窗口与正文阅读器，不使用真实账号
 python tools/smoke.py ui --ide-home '/path/to/IDE' --plugin-zip build/distributions/linuxdo-jetbrains-plugin-1.0.0.zip
+
+# 当前生产界面的宣传截图：使用示例话题与内存草稿，不发送真实帖子
+python tools/smoke.py ui --ide-home '/path/to/IDE' --plugin-zip build/distributions/linuxdo-jetbrains-plugin-1.0.0.zip --showcase
 ```
 
 Windows 示例：`python tools/smoke.py private --ide-home 'C:\path\to\WebStorm'`。默认离线构建，依赖尚未缓存时加 `--online`。联网模式默认使用 LinuxDo DoH，可通过 `--doh-url` 指定测试地址。
@@ -41,6 +44,8 @@ Windows 示例：`python tools/smoke.py private --ide-home 'C:\path\to\WebStorm'
 独立 JCEF 检查需要桌面会话，Linux CI 可使用 `xvfb-run`。结果位于 `build/portable-smoke/`，成功标记为 `PORTABLE_NATIVE_PASS=true`；联网检查需各项断言通过且进程正常退出。安装包检查结果位于 `build/host-smoke/`；商业 IDE 的许可可能限制完整启动。模拟 Application 的检查不能替代安装包类加载验证，真实账号及桌面交互仍需按[跨平台指南](../docs/cross-platform.md)验收。
 
 `ui` 使用已打包插件中的真实回复窗口、定时器和正文阅读器，输出 `IDE_UI_PASS=true`、断言报告与截图；自动建立空配置，避免首次启动导入个人设置。草稿延迟、断网、409 和发送均由内存传输模拟，并记录 EDT 响应时间。工具不打入插件包。
+
+`--showcase` 单独捕获话题阅读、新建话题、按需预览、板块、标签、回复、设置和空白登录窗口，报告同样位于 `build/host-smoke/`。示例草稿只保存在内存；登录窗口可能读取论坛公开页面。截图期间请暂停其他桌面自动化，避免抢占窗口。发布前逐张检查图片，不以截图运行代替完整交互回归。
 
 仅在账号拥有者明确授权后，且专用 Chrome CDP 窗口已登录测试账号时，可运行 `python tools/draft-handoff.py --ide-home '/path/to/IDE'`。需要 Playwright；默认连接端口 19337。该工具拒绝覆盖已有草稿，限定话题 482293 和指定测试正文，在浏览器内执行已认证草稿请求，不导出 Cookie/CSRF。IDE 使用实际回复窗口与草稿服务，通过测试文件桥接浏览器请求；网页使用原生编辑器。结果在 `build/draft-handoff/`，成功标记为 `DRAFT_HANDOFF_PASS=true`。它不会调用真实帖子发送接口；只在内容和序列匹配时清理本次草稿。不要把此桥接检查当作插件默认 HTTP 传输的完整登录验收。
 

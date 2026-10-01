@@ -28,15 +28,15 @@ git push -u origin main
 | 许可 | MIT |
 | IDE 范围 | 2026.2 / 262.* |
 | 安装包 | `build/distributions/linuxdo-jetbrains-plugin-1.0.0.zip` |
-| 源码、问题反馈链接 | 待创建 GitHub 仓库后填写 |
-| 隐私说明链接 | 待填写仓库内 `docs/privacy.md` 的公开链接 |
-| 图标及截图 | 截图素材：[话题与正文](images/topics.jpg)、[登录](images/login.jpg)、[创建话题](images/create-topic.jpg)、[设置](images/settings.png)。提交前检查账号与本机路径是否需要遮挡，并准备有权使用的图标 |
+| 源码、问题反馈链接 | https://github.com/lgguan/linuxdo-jetbrains-plugin · https://github.com/lgguan/linuxdo-jetbrains-plugin/issues |
+| 隐私说明链接 | https://github.com/lgguan/linuxdo-jetbrains-plugin/blob/main/docs/privacy.md |
+| 图标及截图 | 当前实际 IDE 截图：[话题与正文](images/topics.png)、[登录](images/login.png)、[创建话题与预览](images/create-topic-preview.png)、[回复](images/reply.png)、[板块](images/category-picker.png)、[标签](images/tag-picker.png)、[设置](images/settings.png)。使用示例内容；不包含凭据或本机日志 |
 
 ### 描述（可粘贴）
 
 Linux Do (API Docs) is an unofficial Linux Do community client for JetBrains IDEs, independently developed by lgguan and licensed under MIT. It is not affiliated with or endorsed by Linux Do or JetBrains.
 
-Browse and search topics in a documentation-style interface, create topics and replies, receive notifications, and synchronize reading progress. Navigate long discussions by floor and use the configurable boss key to hide and restore topic tabs.
+Browse and search topics in a documentation-style interface with categories, tags, unread status and matching search excerpts. Navigate directly to a matching floor, return after a jump, and refresh without losing your position. Create topics and replies with shared icon toolbars and on-demand previews. Resume native forum drafts across the IDE and website, with two-second autosave and explicit conflict choices. Search category paths and descriptions, and use the web-style tag picker with usage counts and removable selected chips. Receive notifications and synchronize reading progress; use the configurable boss key to hide and restore topic tabs.
 
 The plugin uses a private JCEF browser session and JetBrains PasswordSafe for saved credentials. LinuxDo DoH (`https://ldh.ddd.oaifree.com/query-dns`) is enabled by default; custom HTTPS resolvers and system DNS remain available in settings. The selected DoH service receives domain queries. There is no independent analytics or telemetry service.
 
@@ -46,7 +46,7 @@ Restart the IDE when prompted after installation, updates, disabling, or uninsta
 
 ### 更新说明（可粘贴）
 
-1.0.0 — Initial public release: documentation-style topic browsing, search, posting and replies, notifications, reading progress, floor navigation, private JCEF login, a boss key, and LinuxDo DoH enabled by default.
+1.0.0 — Initial public release, updated during review: richer post rendering, paginated search with excerpts, refresh position preservation and return navigation. Shared composer icon toolbars, on-demand previews, native forum draft synchronization and conflict handling. Direct new-topic entry, enlarged windows and searchable categories. Web-style tag selection with counts and removable chips; fixed tag limit errors and freezes on reopen. Ordinary rate limits and Cloudflare verification now have separate prompts. Includes private JCEF login, notifications, reading progress, a boss key and LinuxDo DoH.
 
 ## 手动提交
 

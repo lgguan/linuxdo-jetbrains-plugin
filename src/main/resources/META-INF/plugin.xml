@@ -15,12 +15,16 @@
         <li><b>Developer Documentation / Code Camouflage Mode</b>: Integrates seamlessly into the IDE editor with Monospace/JetBrains Mono typography, Git-Log/Issue-tracker style list, and RFC/Javadoc formatted post reader.</li>
         <li><b>DNS-over-HTTPS (DoH)</b>: Defaults to LinuxDo DoH (https://ldh.ddd.oaifree.com/query-dns). Custom HTTPS resolvers and system DNS are also available.</li>
         <li><b>Cloudflare Verification &amp; Auth</b>: Integrated JCEF authentication to solve Cloudflare Turnstile challenges and persist session credentials securely via PasswordSafe.</li>
-        <li><b>Discourse API Features</b>: Topic lists (Latest, Top, New, Unread), categories filter, full-text search, rich post reading, read progress tracking (/topics/timings sync), and Git-commit style reply composer.</li>
+        <li><b>Browsing &amp; Navigation</b>: Compact topic lists with categories, tags, unread status and relative activity times. Paginated search includes matching excerpts and opens the matching floor. Refresh preserves your selection and position. Return to the floor before a jump.</li>
+        <li><b>Rich Reading &amp; Composing</b>: Quotes, code blocks with copy actions, tables, link cards, details and spoilers. Shared icon toolbars for topics and replies, formatting menus, image uploads and on-demand preview.</li>
+        <li><b>Forum Drafts</b>: Resume native topic and reply drafts across the IDE and website. Autosave after two seconds, preserve reply targets, and choose between versions on conflicts. No additional local draft-body files.</li>
+        <li><b>Topic Categories &amp; Tags</b>: Search category names, parent paths and descriptions; the menu closes after selection. A web-style tag picker shows usage counts, removable selected chips, a search field and category restrictions.</li>
+        <li><b>Notifications &amp; Read Progress</b>: Notifications and optional reading progress synchronization. Ordinary HTTP 429 prompts a cooldown; Cloudflare verification responses prompt manual verification.</li>
         <li><b>Boss Key (Emergency Mode)</b>: Hide all topic tabs and the API Docs panel; press again to restore.</li>
     </ul>
     ]]></description>
 
-    <change-notes><![CDATA[1.0.0: Initial public release. Browse, search, create topics and replies, track reading progress and notifications in a documentation-style interface. Includes private JCEF login, floor navigation, a boss key, and LinuxDo DoH enabled by default. Updated IDE proxy configuration and credential access, theme detection, PasswordSafe attributes, and settings error rendering to remove deprecated API usages reported during initial review.]]></change-notes>
+    <change-notes><![CDATA[1.0.0: Initial public release, updated during review. Improved documentation-style post rendering, paginated search with matching excerpts, refresh position preservation and return navigation. Topics and replies share icon toolbars and on-demand preview, synchronize native forum drafts and retain content on errors or conflicts. New topics open directly or restore the single existing draft. Added searchable categories and a web-style tag picker with removable chips and usage counts; fixed tag limit errors and freezes when reopening the picker. Enlarged composer windows and distinguished forum rate limits from Cloudflare verification prompts. Includes private JCEF login, notifications, read progress, a boss key and LinuxDo DoH.]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.jcef</depends>

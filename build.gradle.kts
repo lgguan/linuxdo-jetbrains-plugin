@@ -16,6 +16,11 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("org.jsoup:jsoup:1.18.3")
+    implementation("org.commonmark:commonmark:0.30.0")
+    implementation("org.commonmark:commonmark-ext-gfm-tables:0.30.0")
+    implementation("org.commonmark:commonmark-ext-autolink:0.30.0")
+    implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.30.0")
+    implementation("org.commonmark:commonmark-ext-task-list-items:0.30.0")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
 }
 

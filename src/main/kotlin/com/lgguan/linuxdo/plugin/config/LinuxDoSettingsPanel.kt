@@ -128,11 +128,11 @@ class LinuxDoSettingsPanel : com.intellij.openapi.Disposable {
         formBuilder.addComponent(networkTip)
 
         // 4. 安全通知与轮询防风控 (Notification & Anti-429)
-        formBuilder.addComponent(TitledSeparator("安全通知与轮询防风控 (Notification & Anti-429)"))
+        formBuilder.addComponent(TitledSeparator("通知与请求频率 (Notifications & Rate Limits)"))
         formBuilder.addComponent(enableNotificationPollingCheckBox)
         formBuilder.addLabeledComponent("前台活跃轮询基准间隔 (秒):", notificationActiveIntervalField)
         formBuilder.addLabeledComponent("未激活/后台时轮询基准间隔 (秒):", notificationInactiveIntervalField)
-        val safetyTipLabel = JBLabel("<html><small style='color:gray;'>* 内置 ±20% 动态随机抖动，未激活窗口自动降频降低服务器压力，触发 HTTP 429 自动进入 15 分钟安全熔断保护。</small></html>")
+        val safetyTipLabel = JBLabel("<html><small style='color:gray;'>* 轮询间隔带 ±20% 随机浮动，未激活窗口自动降频；收到论坛频率限制 (HTTP 429) 后暂停请求，优先采用服务器指定的冷却时间，未指定时等待 15 分钟。</small></html>")
         formBuilder.addComponent(safetyTipLabel)
 
         // 5. 账号授权与 Cloudflare 验证 (Authentication & Session)

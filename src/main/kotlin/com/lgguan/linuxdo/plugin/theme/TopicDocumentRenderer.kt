@@ -31,7 +31,7 @@ object TopicDocumentRenderer {
     ): String {
         val postsHtml = buildPostFragment(topic, posts, settings, currentUsername)
         if (fragmentOnly) return postsHtml
-        val css = DocCamouflageCssBuilder.buildCss(theme, settings)
+        val css = DocCamouflageCssBuilder.buildCss(theme, settings) + ForumContent.css
         val namespace = if (settings.categoryNamespaceFormat) {
             NamespaceFormatter.format(categoryName, categorySlug)
         } else {
@@ -60,6 +60,7 @@ object TopicDocumentRenderer {
                 $bridgeScriptTag
                 <script>
                     function jumpToFloor(floorNum) {
+                        if (window.linuxDoPagination) return window.linuxDoPagination.jump(floorNum);
                         var el = document.querySelector('[data-post-number="' + floorNum + '"]') ||
                                  document.getElementById('floor-' + floorNum) ||
                                  document.getElementById('post-num-' + floorNum);
@@ -605,6 +606,13 @@ object TopicDocumentRenderer {
                         var quoteControls = e.target.closest('.quote-controls, .back');
                         if (quote && quoteControls) {
                             var postNum = quote.getAttribute('data-post');
+                            var quotedTopic = quote.getAttribute('data-topic');
+                            if (quotedTopic && quotedTopic !== '${topic.id}' && /^\d+$/.test(quotedTopic) && /^\d+$/.test(postNum || '')) {
+                                e.preventDefault(); e.stopPropagation();
+                                if (window.intellijBridge && window.intellijBridge.handleLinkClick)
+                                    window.intellijBridge.handleLinkClick('https://linux.do/t/' + quotedTopic + '/' + postNum);
+                                return;
+                            }
                             if (postNum && jumpToFloor(parseInt(postNum, 10))) {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -643,6 +651,11 @@ object TopicDocumentRenderer {
                             // In-topic floor jump
                             var currentTopicId = '${topic.id}';
                             var rawHref = a.getAttribute('href') || '';
+                            if (rawHref.startsWith('#content-')) {
+                                var heading = document.getElementById(rawHref.substring(1)) || document.querySelector('a[name="' + rawHref.substring(1) + '"]');
+                                if (heading) { e.preventDefault(); heading.scrollIntoView({behavior:'smooth'}); }
+                                return;
+                            }
                             var inTopicFloorMatch = a.href.match(new RegExp('/t/(?:[^/]+/)?' + currentTopicId + '/(\\d+)')) ||
                                                     rawHref.match(/^#(?:floor-|post-num-|post-)?(\\d+)$/);
                             if (inTopicFloorMatch) {
@@ -791,7 +804,8 @@ object TopicDocumentRenderer {
                         <img class="image-lightbox-img" id="img-lb-img" src="" alt="" />
                     </div>
                 </div>
-                <script>$enhancementsScript</script>
+                <script>${ForumContent.script}
+                    $enhancementsScript</script>
                 <script>$paginationScript</script>
             </body>
             </html>
@@ -868,7 +882,7 @@ object TopicDocumentRenderer {
                         </div>
                     </div>
                     <div class="post-content">
-                        ${balanceDivTags(processContent(ForumHtml.clean(ScrollableSourceBlocks.render(post.cooked, post.raw)), settings.foldImages))}
+                        ${ForumContent.render(ScrollableSourceBlocks.render(post.cooked, post.raw), settings.foldImages, post.id.toString(), "https://linux.do/t/${topic.id}/${post.postNumber}")}
                     </div>
                     ${renderBoosts(post)}
                 </div>
@@ -932,167 +946,11 @@ object TopicDocumentRenderer {
         return false
     }
 
-    fun balanceDivTags(html: String): String {
-        val openCount = Regex("""<div[\s>]""", RegexOption.IGNORE_CASE).findAll(html).count()
-        val closeCount = Regex("""</div>""", RegexOption.IGNORE_CASE).findAll(html).count()
-        if (closeCount > openCount) {
-            val diff = closeCount - openCount
-            return "<div>".repeat(diff) + html
-        } else if (openCount > closeCount) {
-            val diff = openCount - closeCount
-            return html + "</div>".repeat(diff)
-        }
-        return html
-    }
+    fun balanceDivTags(html: String): String = org.jsoup.Jsoup.parseBodyFragment(html).apply {
+        outputSettings().prettyPrint(false)
+    }.body().html()
 
-    fun processContent(cooked: String, foldImages: Boolean): String {
-        if (!foldImages) {
-            // Direct rendering mode:
-            // Remove Discourse's lightbox meta block (<div class="meta">...</div>) so it doesn't render file dimensions / download icons
-            return cooked.replace(
-                Regex("""<div\s+[^>]*class=["'][^"']*meta[^"']*["'][^>]*>[\s\S]*?</div>""", RegexOption.IGNORE_CASE),
-                ""
-            )
-        }
-
-        // Step 1: Protect inline tags and badges (<a class="discourse-tag">, <span class="badge-category">, <a class="hashtag-cooked">, etc.)
-        val protectedTokens = mutableListOf<String>()
-        val tagBadgeRegex = Regex(
-            """<(?:a|span)\s+[^>]*class=["'][^"']*(?:discourse-tag|badge-category|badge-wrapper|hashtag|hashtag-cooked)[^"']*["'][^>]*>[\s\S]*?</(?:a|span)>""",
-            RegexOption.IGNORE_CASE
-        )
-        val withTagsProtected = tagBadgeRegex.replace(cooked) { matchResult ->
-            val token = "___LINUXDO_PROTECTED_TAG_${protectedTokens.size}___"
-            protectedTokens.add(matchResult.value)
-            token
-        }
-
-        var counter = 0
-        val foldBoxTokens = mutableListOf<String>()
-
-        fun cleanExtraAttrs(attrs: String): String {
-            return attrs
-                .replace(Regex("""(?<=\s|^)src=(?:["'][^"']*["']|[^\s>]+)""", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("""(?<=\s|^)class=(?:["'][^"']*["']|[^\s>]+)""", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("""(?<=\s|^)id=(?:["'][^"']*["']|[^\s>]+)""", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("""(?<=\s|^)onclick=(?:["'][^"']*["']|[^\s>]+)""", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("""(?<=\s|^)data-title=(?:["'][^"']*["']|[^\s>]+)""", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("""(?<=\s|^)data-orig-src=(?:["'][^"']*["']|[^\s>]+)""", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("""(?<=\s|^)data-thumb-src=(?:["'][^"']*["']|[^\s>]+)""", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("""(?<=\s|^)title=(?:["'][^"']*["']|[^\s>]+)""", RegexOption.IGNORE_CASE), "")
-                .trim()
-        }
-
-        fun createFoldBox(origSrc: String, thumbSrc: String? = null, extraAttrs: String, customTitle: String? = null): String {
-            counter++
-            val imgId = "fold-img-$counter"
-            val normOrigSrc = normalizeUrl(origSrc)
-            val normThumbSrc = if (!thumbSrc.isNullOrBlank()) normalizeUrl(thumbSrc) else normOrigSrc
-            val displaySrc = if (normThumbSrc.isNotBlank()) normThumbSrc else normOrigSrc
-
-            // Pick file name from normOrigSrc if possible, fallback to displaySrc
-            val pathForName = normOrigSrc.ifBlank { displaySrc }
-            val fileName = pathForName.substringAfterLast("/").substringBefore("?").ifBlank { "image_$counter.png" }
-
-            val altMatch = extractAttribute(extraAttrs, "alt")?.trim() ?: ""
-            val hasMeaningfulAlt = altMatch.isNotBlank() &&
-                    !altMatch.equals("image", ignoreCase = true) &&
-                    !altMatch.equals("screenshot", ignoreCase = true) &&
-                    !altMatch.equals(fileName.substringBeforeLast("."), ignoreCase = true) &&
-                    !altMatch.equals(fileName, ignoreCase = true)
-            val desc = if (hasMeaningfulAlt) " - $altMatch" else ""
-
-            val titleText = if (hasMeaningfulAlt) altMatch else (customTitle?.ifBlank { null } ?: fileName)
-            val openText = "[📷 Figure: $fileName$desc (点击展开 / Expand)]"
-            val closeText = "[📷 Figure: $fileName$desc (点击收起 / Collapse)]"
-            val cleaned = cleanExtraAttrs(extraAttrs)
-            val attrsPart = if (cleaned.isNotBlank()) " $cleaned" else ""
-            return """
-                <div class="fold-img-box">
-                    <span class="img-placeholder" id="ph-$imgId" onclick="toggleImg('$imgId', event)" data-open-text="$openText" data-close-text="$closeText" title="点击展开/收起图片 (Click to toggle)">$openText</span>
-                    <img id="$imgId" src="$displaySrc" data-orig-src="$normOrigSrc" data-thumb-src="$normThumbSrc" data-title="${escapeHtml(titleText)}" onclick="openLightbox(this.getAttribute('data-orig-src') || this.currentSrc || this.src, this.getAttribute('data-title'), event, this.getAttribute('data-thumb-src') || this.currentSrc || this.src)" title="点击查看大图 (Click to zoom in) / 点击上方注释收起"$attrsPart />
-                </div>
-            """.trimIndent()
-        }
-
-        fun createFoldBoxToken(origSrc: String, thumbSrc: String? = null, extraAttrs: String, customTitle: String? = null): String {
-            val html = createFoldBox(origSrc, thumbSrc, extraAttrs, customTitle)
-            val token = "___LINUXDO_FOLD_BOX_${foldBoxTokens.size}___"
-            foldBoxTokens.add(html)
-            return token
-        }
-
-        // Step 2: Handle Discourse <div class="lightbox-wrapper">...</div>
-        val lightboxWrapperRegex = Regex(
-            """<div\s+[^>]*class=["'][^"']*lightbox-wrapper[^"']*["'][^>]*>([\s\S]*?<a\b[^>]*class=["'][^"']*lightbox[^"']*["'][^>]*>[\s\S]*?<img\b[^>]*>[\s\S]*?</a>\s*</div>)""",
-            RegexOption.IGNORE_CASE
-        )
-        var content = lightboxWrapperRegex.replace(withTagsProtected) { match ->
-            val wrapperBody = match.value
-            val aTag = Regex("""<a\b[^>]*class=["'][^"']*lightbox[^"']*["'][^>]*>""", RegexOption.IGNORE_CASE).find(wrapperBody)?.value ?: ""
-            val imgTag = Regex("""<img\b[^>]*>""", RegexOption.IGNORE_CASE).find(wrapperBody)?.value ?: ""
-            val origHref = extractAttribute(aTag, "href") ?: ""
-            val thumbSrc = extractAttribute(imgTag, "src") ?: origHref
-            val aTitle = extractAttribute(aTag, "title")
-            val cleanAttrs = imgTag.removePrefix("<img").removeSuffix("/>").removeSuffix(">").trim()
-            createFoldBoxToken(origHref, thumbSrc, cleanAttrs, aTitle)
-        }
-
-        // Step 3: Handle standalone <a class="lightbox">...</a> (if not wrapped in lightbox-wrapper)
-        val lightboxLinkRegex = Regex(
-            """<a\b[^>]*class=["'][^"']*lightbox[^"']*["'][^>]*>([\s\S]*?<img\b[^>]*>[\s\S]*?)</a>""",
-            RegexOption.IGNORE_CASE
-        )
-        content = lightboxLinkRegex.replace(content) { match ->
-            val aTag = Regex("""<a\b[^>]*class=["'][^"']*lightbox[^"']*["'][^>]*>""", RegexOption.IGNORE_CASE).find(match.value)?.value ?: ""
-            val imgTag = Regex("""<img\b[^>]*>""", RegexOption.IGNORE_CASE).find(match.value)?.value ?: ""
-            val origHref = extractAttribute(aTag, "href") ?: ""
-            val thumbSrc = extractAttribute(imgTag, "src") ?: origHref
-            val aTitle = extractAttribute(aTag, "title")
-            val cleanAttrs = imgTag.removePrefix("<img").removeSuffix("/>").removeSuffix(">").trim()
-            createFoldBoxToken(origHref, thumbSrc, cleanAttrs, aTitle)
-        }
-
-        // Step 4: Handle <a href="image-url"><img ...></a> where link is direct image link
-        val imageLinkRegex = Regex(
-            """<a\b[^>]*?(?<=\s|^)href=["']([^"']*(?:/uploads/[^"']+|\.(?:png|jpe?g|gif|webp|bmp|svg)(?:\?[^"']*)?))["'][^>]*>\s*(<img\b[^>]*?>)\s*</a>""",
-            RegexOption.IGNORE_CASE
-        )
-        content = imageLinkRegex.replace(content) { match ->
-            val linkHref = match.groupValues[1]
-            val imgTag = match.groupValues[2]
-            val imgSrc = extractAttribute(imgTag, "src") ?: linkHref
-            if (isInlineOrSmallImage(imgTag, imgSrc)) {
-                imgTag
-            } else {
-                val cleanAttrs = imgTag.removePrefix("<img").removeSuffix("/>").removeSuffix(">").trim()
-                createFoldBoxToken(linkHref, imgSrc, cleanAttrs)
-            }
-        }
-
-        // Step 5: Handle remaining standalone <img> tags
-        val standaloneImgRegex = Regex("""<img\b[^>]*>""", RegexOption.IGNORE_CASE)
-        content = standaloneImgRegex.replace(content) { match ->
-            val fullTag = match.value
-            val src = extractAttribute(fullTag, "src") ?: ""
-            if (src.isBlank() || isInlineOrSmallImage(fullTag, src)) {
-                fullTag
-            } else {
-                val extraAttrs = fullTag.removePrefix("<img").removeSuffix("/>").removeSuffix(">").trim()
-                createFoldBoxToken(src, src, extraAttrs)
-            }
-        }
-
-        // Step 6: Restore fold boxes and protected tags
-        foldBoxTokens.forEachIndexed { idx, boxHtml ->
-            content = content.replace("___LINUXDO_FOLD_BOX_${idx}___", boxHtml)
-        }
-        protectedTokens.forEachIndexed { idx, originalHtml ->
-            content = content.replace("___LINUXDO_PROTECTED_TAG_${idx}___", originalHtml)
-        }
-
-        return content
-    }
+    fun processContent(cooked: String, foldImages: Boolean): String = ForumContent.render(cooked, foldImages)
 
     private fun renderBoosts(post: Post): String {
         val boosts = post.boosts

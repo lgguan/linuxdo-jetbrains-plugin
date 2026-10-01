@@ -20,7 +20,7 @@ import javax.swing.JPanel
 import javax.swing.SwingUtilities
 
 /** Swing browser view backed exclusively by the plugin's own cef_server. */
-class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get()) : Disposable {
+class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(), private val readOnly: Boolean = false) : Disposable {
     @Volatile var isDisposed = false
         private set
     @Volatile private var created = false
@@ -114,6 +114,9 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get())
                 }
                 "getResourceRequestHandler" -> {
                     val url = runtime.call(args[2]!!, "getURL") as String
+                    if (readOnly) return@handler runtime.handler("org.cef.handler.CefResourceRequestHandler") { name, resourceArgs ->
+                        if (name == "onBeforeResourceLoad") runtime.call(resourceArgs[2]!!, "getMethod") !in setOf("GET", "HEAD", "OPTIONS") else null
+                    }
                     documentBytes?.takeIf { url.substringBefore('#') == documentUrl }?.let { bytes ->
                         runtime.handler("org.cef.handler.CefResourceRequestHandler") { name, _ ->
                             if (name == "getResourceHandler") documentResource(bytes) else null

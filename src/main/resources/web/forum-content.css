@@ -1,0 +1,21 @@
+.forum-table { overflow-x:auto; max-width:100%; margin:12px 0; }
+.post-content .forum-table table { display:table; width:auto; min-width:40%; border-collapse:collapse; }
+.forum-table td,.forum-table th { border:1px solid var(--border); padding:6px 10px; }
+aside.quote { border-left:3px solid var(--link); margin:12px 0; padding:8px 12px; background:var(--code-bg); }
+aside.quote .title { font-size:.9em; color:var(--comment); }
+aside.quote .quote-controls { cursor:pointer; color:var(--link); }
+aside.quote blockquote { margin:8px 0 0; border:0; padding:0; }
+aside.onebox { display:block; border:1px solid var(--border); border-radius:4px; margin:12px 0; padding:12px; overflow:hidden; }
+aside.onebox header { color:var(--comment); font-size:.85em; }
+aside.onebox .site-icon { display:inline; width:18px; height:18px; vertical-align:middle; }
+aside.onebox .thumbnail,aside.onebox .aspect-image img { max-width:160px; max-height:120px; object-fit:contain; }
+aside.onebox h3 { margin:8px 0; }
+details { border:1px solid var(--border); border-radius:4px; padding:8px 12px; margin:10px 0; }
+summary { cursor:pointer; color:var(--link); }
+.spoiler { cursor:pointer; background:var(--code-bg); }
+.spoiler:not(.revealed) { color:transparent; text-shadow:0 0 8px var(--fg); }
+.spoiler:not(.revealed) * { visibility:hidden; }
+.spoiler.revealed { text-shadow:none; }
+.forum-unsupported { color:var(--comment); border-left:2px solid var(--border); padding-left:8px; }
+pre { white-space:pre; overflow:auto; }
+@media(max-width:480px) { aside.onebox,aside.quote { padding:8px; } }

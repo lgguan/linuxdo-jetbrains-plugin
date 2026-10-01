@@ -341,18 +341,18 @@ class LinuxDoNotificationService(
                 val targetProject = IdeFocusManager.getGlobalInstance().lastFocusedFrame?.project
                     ?: ProjectManager.getInstance().openProjects.firstOrNull { it.isOpen }
                 val minutes = (cooldownSeconds + 59) / 60
-                val content = "检测到 <b>$reason</b>，插件已自动进入安全熔断保护模式。<br>已<b>暂停自动轮询 $minutes 分钟</b>，防止高频访问导致账号被风控或临时封禁。"
+                val content = "检测到 <b>$reason</b>。<br>已<b>暂停自动轮询 $minutes 分钟</b>，冷却结束后自动恢复。"
                 val group = try {
                     NotificationGroupManager.getInstance().getNotificationGroup("LinuxDo Notifications")
                 } catch (_: Throwable) { null }
 
                 val notification = group?.createNotification(
-                    "Linux Do 频控熔断保护 (HTTP 429)",
+                    "Linux Do 自动轮询已暂停",
                     content,
                     NotificationType.WARNING
                 ) ?: Notification(
                     "LinuxDo Notifications",
-                    "Linux Do 频控熔断保护 (HTTP 429)",
+                    "Linux Do 自动轮询已暂停",
                     content,
                     NotificationType.WARNING
                 )

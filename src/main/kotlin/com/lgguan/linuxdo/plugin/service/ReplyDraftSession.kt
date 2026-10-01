@@ -57,70 +57,28 @@ internal class ReplyDraftSession(
     private val transport: DraftTransport = ForumDraftTransport,
     private val checkSession: (Long) -> Unit = SessionEpoch::requireCurrent
 ) {
-    val key = "topic_$topicId"
-    private var draft: ForumDraft? = null
-    var conflicted = false
-        private set
-
-    @Synchronized fun load(): ForumDraft {
-        checkSession(version)
-        val loaded = transport.read(key, version).getOrThrow()
-        checkSession(version)
-        draft = loaded
-        return loaded
-    }
-
-    @Synchronized fun choose(server: ForumDraft) {
-        checkSession(version)
-        require(server.supported) { "仅支持普通回复草稿" }
-        draft = server
-        conflicted = false
-    }
-
-    @Synchronized fun save(body: String, target: ReplyTarget): ForumDraft {
-        checkSession(version)
-        check(!conflicted) { "草稿冲突，请先选择保留版本" }
-        val previous = checkNotNull(draft) { "请先读取论坛草稿" }
-        require(previous.supported) { "仅支持普通回复草稿" }
-        val data = previous.data?.deepCopy() ?: JsonObject()
-        data.addProperty("action", "reply")
-        data.addProperty("reply", body)
-        data.addProperty("reply_to_post_number", target.floor)
-        data.add("reply_to_user", target.author.takeIf { it.isNotBlank() }?.let {
-            (data.get("reply_to_user")?.takeIf { value -> value.isJsonObject }?.asJsonObject?.deepCopy() ?: JsonObject()).apply {
-                addProperty("username", it)
-            }
-        })
-        data.addProperty("postId", target.postId)
-        if (data == previous.data) return previous
-        val result = transport.save(key, previous.sequence, data, version)
-        if ((result.exceptionOrNull() as? HttpStatusException)?.status == 409) conflicted = true
-        val sequence = result.getOrThrow()
-        checkSession(version)
-        return ForumDraft(sequence, data).also { draft = it }
-    }
-
+    private val session = ForumDraftSession("topic_$topicId", version, transport, checkSession) { it.supported }
+    val key: String get() = session.key
+    val conflicted: Boolean get() = session.conflicted
+    fun load(): ForumDraft = session.load()
+    fun choose(server: ForumDraft) = session.choose(server)
+    fun save(body: String, target: ReplyTarget): ForumDraft = session.save { data -> replyData(data, body, target) }
+    private fun replyData(previous: JsonObject?, body: String, target: ReplyTarget): JsonObject =
+        (previous ?: JsonObject()).apply {
+            addProperty("action", "reply")
+            addProperty("reply", body)
+            addProperty("reply_to_post_number", target.floor)
+            add("reply_to_user", target.author.takeIf { it.isNotBlank() }?.let { author ->
+                (get("reply_to_user")?.takeIf { it.isJsonObject }?.asJsonObject?.deepCopy() ?: JsonObject()).apply {
+                    addProperty("username", author)
+                }
+            })
+            addProperty("postId", target.postId)
+        }
     enum class Cleanup { CLEARED, OTHER_CLIENT }
-    @Synchronized fun clearOwned(): Cleanup {
-        checkSession(version)
-        check(!conflicted) { "草稿冲突，请先选择保留版本" }
-        val owned = checkNotNull(draft) { "尚未读取论坛草稿" }
-        require(owned.supported) { "仅支持普通回复草稿" }
-        val current = transport.read(key, version).getOrThrow()
-        checkSession(version)
-        if (current.data == null) return Cleanup.CLEARED
-        if (current != owned) return Cleanup.OTHER_CLIENT
-        transport.delete(key, owned.sequence, version).getOrThrow()
-        val after = transport.read(key, version).getOrThrow()
-        checkSession(version)
-        return if (after.data == null) Cleanup.CLEARED else Cleanup.OTHER_CLIENT
-    }
-
-    @Synchronized fun <T> publish(body: String, target: ReplyTarget, send: () -> T): Pair<T, Result<Cleanup>> {
-        save(body, target)
-        checkSession(version)
-        val published = send()
-        // A confirmed post is never made retryable by a cleanup failure.
-        return published to runCatching { clearOwned() }
+    fun clearOwned(): Cleanup = Cleanup.valueOf(session.clearOwned().name)
+    fun <T> publish(body: String, target: ReplyTarget, send: () -> T): Pair<T, Result<Cleanup>> {
+        val (result, cleanup) = session.publish({ replyData(it, body, target) }, send)
+        return result to cleanup.map { Cleanup.valueOf(it.name) }
     }
 }

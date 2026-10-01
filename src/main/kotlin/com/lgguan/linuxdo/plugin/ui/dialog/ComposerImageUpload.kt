@@ -28,6 +28,9 @@ internal class ComposerImageUpload(
     private val disposed: () -> Boolean,
     private val changed: () -> Unit
 ) {
+    internal var transport: (ByteArray, String, String, Long) -> com.lgguan.linuxdo.plugin.model.UploadResponse = { bytes, name, type, version ->
+        DiscourseApiClient.uploadImageBytes(bytes, name, type, expectedVersion = version).getOrThrow()
+    }
     fun bytes(bytes: ByteArray, name: String) = upload(name) { bytes }
 
     fun file(file: File) = upload(file.name) {
@@ -50,39 +53,67 @@ internal class ComposerImageUpload(
         }
     }
 
+    private data class Job(val name: String, val read: () -> ByteArray, val position: javax.swing.text.Position,
+        val session: Long, val generation: Int)
+    private val queue = java.util.ArrayDeque<Job>()
+    private val failed = java.util.ArrayDeque<Job>()
+    private val idle = mutableListOf<() -> Unit>()
+    private var running = 0
+    @Volatile private var generation = 0
+    val pending: Int get() = queue.size + running
+    val failures: Int get() = failed.size
+    fun discardFailures() { failed.clear(); changed() }
+    fun whenIdle(action: () -> Unit) { if (pending == 0) action() else idle.add(action) }
+    fun cancel() { generation++; queue.clear(); failed.clear(); idle.clear() }
+    fun retry() {
+        if (!textArea.isEnabled || disposed()) return
+        val jobs = failed.toList(); failed.clear()
+        jobs.filter { it.session == SessionEpoch.current }.forEach { queue.add(it.copy(generation = generation)) }
+        changed(); drain()
+    }
     private fun upload(name: String, read: () -> ByteArray) {
-        statusLabel.text = "⏳ 正在处理并上传图片..."
-        val session = SessionEpoch.current
-        tasks.submit {
-            var localUri: String? = null
-            val result = runCatching {
-                check(session == SessionEpoch.current && !disposed()) { "账号已切换或编辑器已关闭" }
-                val bytes = read()
-                require(bytes.size <= ImageDownload.MAX_BYTES) { "图片超过 24 MB" }
-                localUri = LinuxDoImageCache.cacheImageBytes(bytes, name)
-                DiscourseApiClient.uploadImageBytes(bytes, name, mimeType(name), expectedVersion = session).getOrThrow()
-            }
-            ApplicationManager.getApplication().invokeLater({
-                if (disposed() || project.isDisposed) return@invokeLater
-                if (session != SessionEpoch.current) {
-                    statusLabel.text = "账号已切换，请重新上传图片"
-                    return@invokeLater
+        if (!textArea.isEnabled || disposed()) return
+        queue.add(Job(name, read, textArea.document.createPosition(textArea.caretPosition), SessionEpoch.current, generation))
+        statusLabel.text = "正在处理并上传图片…"
+        changed()
+        drain()
+    }
+    private fun drain() {
+        while (running < 2 && queue.isNotEmpty()) {
+            val job = queue.removeFirst()
+            running++
+            tasks.submit {
+                var localUri: String? = null
+                val result = runCatching {
+                    check(job.session == SessionEpoch.current && !disposed() && job.generation == generation) { "账号已切换或编辑器已关闭" }
+                    val bytes = job.read()
+                    require(bytes.size <= ImageDownload.MAX_BYTES) { "图片超过 24 MB" }
+                    localUri = LinuxDoImageCache.cacheImageBytes(bytes, job.name)
+                    transport(bytes, job.name, mimeType(job.name), job.session)
                 }
-                result.onSuccess { upload ->
-                    val target = upload.shortUrl ?: upload.url
-                    listOf(upload.shortUrl, upload.url, upload.shortPath, target).forEach { LinuxDoImageCache.put(it, localUri) }
-                    val label = (upload.originalFilename ?: name).replace(Regex("[\\[\\]\\r\\n]"), "_")
-                    textArea.insert("\n![$label]($target)\n", textArea.caretPosition)
-                    statusLabel.text = "🟢 图片上传成功并已插入！"
-                    statusLabel.toolTipText = null
+                ApplicationManager.getApplication().invokeLater({
+                    running--
+                    if (disposed() || project.isDisposed || job.generation != generation || job.session != SessionEpoch.current) {
+                        drain()
+                        return@invokeLater
+                    }
+                    result.onSuccess { upload ->
+                        val target = upload.shortUrl ?: upload.url
+                        listOf(upload.shortUrl, upload.url, upload.shortPath, target).forEach { LinuxDoImageCache.put(it, localUri) }
+                        val label = (upload.originalFilename ?: job.name).replace(Regex("""[\[\]\r\n]"""), "_")
+                        textArea.insert("\n![$label]($target)\n", job.position.offset.coerceAtMost(textArea.document.length))
+                        statusLabel.text = "图片已上传并插入"
+                        statusLabel.toolTipText = null
+                    }.onFailure {
+                        failed.add(job)
+                        statusLabel.text = "图片上传失败，可点击「重试图片」"
+                        statusLabel.toolTipText = ComposerErrors.parse(it)
+                    }
                     changed()
-                }.onFailure {
-                    val message = ComposerErrors.parse(it.message)
-                    statusLabel.text = "🔴 图片上传失败: ${message.take(35)}"
-                    statusLabel.toolTipText = message
-                    Messages.showErrorDialog(project, "图片上传失败:\n${ComposerErrors.format(message)}", "上传错误")
-                }
-            }, ModalityState.any())
+                    drain()
+                    if (pending == 0) idle.toList().also { idle.clear() }.forEach { it() }
+                }, ModalityState.any())
+            }
         }
     }
 

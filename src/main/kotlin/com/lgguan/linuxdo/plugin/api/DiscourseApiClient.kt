@@ -463,53 +463,44 @@ object DiscourseApiClient {
         }
     }
 
-    fun createReply(topicId: Long, rawContent: String, replyToPostNumber: Int? = null, expectedVersion: Long = SessionEpoch.current): Result<Post> {
-        if (expectedVersion != SessionEpoch.current) return Result.failure(com.lgguan.linuxdo.plugin.net.StaleSessionException())
-        val baseUrl = getBaseUrl()
-        val url = DiscourseUrls.createPost(baseUrl)
-        val session = expectedVersion
+    fun createReply(topicId: Long, rawContent: String, replyToPostNumber: Int? = null,
+        expectedVersion: Long = SessionEpoch.current): Result<Post> =
+        publishReply(topicId, rawContent, replyToPostNumber, expectedVersion).mapCatching { outcome ->
+            (outcome as? com.lgguan.linuxdo.plugin.model.PublishOutcome.Published)?.post
+                ?: throw IllegalStateException("已提交审核，请在网页查看")
+        }
+
+    internal fun publishReply(topicId: Long, raw: String, floor: Int?, version: Long,
+        draftKey: String? = null): Result<com.lgguan.linuxdo.plugin.model.PublishOutcome> = publishPost(JsonObject().apply {
+        addProperty("topic_id", topicId)
+        addProperty("raw", raw)
+        if (floor != null && floor > 0) addProperty("reply_to_post_number", floor)
+        if (draftKey != null) addProperty("draft_key", draftKey)
+        addProperty("nested_post", true)
+    }, version)
+
+    private fun publishPost(json: JsonObject, version: Long): Result<com.lgguan.linuxdo.plugin.model.PublishOutcome> = runCatching {
+        SessionEpoch.requireCurrent(version)
         val csrf = getCsrfToken()
-        if (session != SessionEpoch.current) return Result.failure(com.lgguan.linuxdo.plugin.net.StaleSessionException())
-        LinuxDoLog.info("createReply: topicId=$topicId, replyTo=$replyToPostNumber, len=${rawContent.length}")
-
-        val json = JsonObject().apply {
-            addProperty("topic_id", topicId)
-            addProperty("raw", rawContent)
-            if (replyToPostNumber != null && replyToPostNumber > 0) {
-                addProperty("reply_to_post_number", replyToPostNumber)
-            }
-            addProperty("nested_post", true)
-        }
-
-        if (shouldUseJcefBridge()) {
-            return LinuxDoJcefBridge.executePostJson<Post>(url, json.toString(), csrf, expectedVersion = session)
-        }
-
-        fun buildRequest(token: String?): Request {
-            val reqBuilder = Request.Builder().tag(SessionEpoch.Stamp::class.java, SessionEpoch.Stamp(session))
-                .url(url)
-                .post(json.toString().toRequestBody(JSON_MEDIA_TYPE))
-            if (!token.isNullOrBlank()) {
-                reqBuilder.header("X-CSRF-Token", token)
-            }
-            return reqBuilder.build()
-        }
-
-        try {
-            val response = executeWrite(csrf, ::buildRequest)
-            return response.use { res ->
+        SessionEpoch.requireCurrent(version)
+        val url = DiscourseUrls.createPost(getBaseUrl())
+        val response = if (shouldUseJcefBridge()) {
+            LinuxDoJcefBridge.executePostJson<JsonObject>(url, json.toString(), csrf, expectedVersion = version).getOrThrow()
+        } else {
+            executeWrite(csrf) { token ->
+                Request.Builder().tag(SessionEpoch.Stamp::class.java, SessionEpoch.Stamp(version)).url(url)
+                    .post(json.toString().toRequestBody(JSON_MEDIA_TYPE)).apply {
+                        if (!token.isNullOrBlank()) header("X-CSRF-Token", token)
+                    }.build()
+            }.use { res ->
                 val body = res.body?.string().orEmpty()
-                if (res.isSuccessful) {
-                    val post = gson.fromJson(body, Post::class.java)
-                    Result.success(post)
-                } else {
-                    Result.failure(HttpFailure.classify(res.code, res.headers.toMap(), body)!!)
-                }
+                HttpFailure.classify(res.code, res.headers.toMap(), body)?.let { throw it }
+                com.google.gson.JsonParser.parseString(body).asJsonObject
             }
-        } catch (e: Exception) {
-            LinuxDoLog.error("createReply exception: ${com.lgguan.linuxdo.plugin.net.NetworkTrace.errorType(e)}", e)
-            return Result.failure(e)
         }
+        com.lgguan.linuxdo.plugin.model.PublishOutcome.parse(response)
+    }.recoverCatching { error ->
+        throw com.lgguan.linuxdo.plugin.model.PublishOutcome.failure(error)
     }
 
     fun toggleLike(postId: Long, like: Boolean, expectedVersion: Long = SessionEpoch.current): Result<Boolean> {
@@ -627,80 +618,22 @@ object DiscourseApiClient {
         }
     }
 
-    fun createTopic(
-        title: String,
-        rawContent: String,
-        categoryId: Int?,
-        tags: List<String> = emptyList(),
-        expectedVersion: Long = SessionEpoch.current
-    ): Result<Post> {
-        if (expectedVersion != SessionEpoch.current) return Result.failure(com.lgguan.linuxdo.plugin.net.StaleSessionException())
-        val baseUrl = getBaseUrl()
-        val session = expectedVersion
-        val csrf = getCsrfToken()
-        if (session != SessionEpoch.current) return Result.failure(com.lgguan.linuxdo.plugin.net.StaleSessionException())
-        val trimmedTitle = title.trim()
-        val trimmedRaw = rawContent.trim()
-        val cleanTags = tags.map {
-            it.trim('"', '\'', '`', '#', '“', '”', '‘', '’', ' ', '\t')
-        }.filter { it.isNotBlank() }
-
-        LinuxDoLog.info("createTopic: categoryId=$categoryId")
-
-        // In Discourse Rails backend, query parameters `tags[]=tag1&tags[]=tag2` ensure `params[:tags]` is parsed as a native Array
-        val basePostUrl = DiscourseUrls.createPost(baseUrl)
-        val fullUrl = if (cleanTags.isNotEmpty()) {
-            val query = cleanTags.joinToString("&") { "tags[]=" + java.net.URLEncoder.encode(it, "UTF-8") }
-            if (basePostUrl.contains("?")) "$basePostUrl&$query" else "$basePostUrl?$query"
-        } else {
-            basePostUrl
+    fun createTopic(title: String, rawContent: String, categoryId: Int?, tags: List<String> = emptyList(),
+        expectedVersion: Long = SessionEpoch.current): Result<Post> =
+        publishTopic(title, rawContent, categoryId, tags, expectedVersion).mapCatching { outcome ->
+            (outcome as? com.lgguan.linuxdo.plugin.model.PublishOutcome.Published)?.post
+                ?: throw IllegalStateException("已提交审核，请在网页查看")
         }
 
-        val json = JsonObject().apply {
-            addProperty("title", trimmedTitle)
-            addProperty("raw", trimmedRaw)
-            if (categoryId != null && categoryId > 0) {
-                addProperty("category", categoryId)
-            }
-            if (cleanTags.isNotEmpty()) {
-                val tagsArray = com.google.gson.JsonArray()
-                cleanTags.forEach { tagsArray.add(it) }
-                add("tags", tagsArray)
-                add("tags[]", tagsArray)
-            }
-            addProperty("archetype", "regular")
-        }
-
-        if (shouldUseJcefBridge()) {
-            return LinuxDoJcefBridge.executePostJson<Post>(fullUrl, json.toString(), csrf, expectedVersion = session)
-        }
-
-        fun buildRequest(token: String?): Request {
-            val reqBuilder = Request.Builder().tag(SessionEpoch.Stamp::class.java, SessionEpoch.Stamp(session))
-                .url(fullUrl)
-                .post(json.toString().toRequestBody(JSON_MEDIA_TYPE))
-            if (!token.isNullOrBlank()) {
-                reqBuilder.header("X-CSRF-Token", token)
-            }
-            return reqBuilder.build()
-        }
-
-        try {
-            val response = executeWrite(csrf, ::buildRequest)
-            return response.use { res ->
-                val body = res.body?.string().orEmpty()
-                if (res.isSuccessful) {
-                    val post = gson.fromJson(body, Post::class.java)
-                    Result.success(post)
-                } else {
-                    Result.failure(HttpFailure.classify(res.code, res.headers.toMap(), body)!!)
-                }
-            }
-        } catch (e: Exception) {
-            LinuxDoLog.error("createTopic exception: ${com.lgguan.linuxdo.plugin.net.NetworkTrace.errorType(e)}", e)
-            return Result.failure(e)
-        }
-    }
+    internal fun publishTopic(title: String, raw: String, categoryId: Int?, tags: List<String>, version: Long,
+        draftKey: String? = null): Result<com.lgguan.linuxdo.plugin.model.PublishOutcome> = publishPost(JsonObject().apply {
+        addProperty("title", title.trim())
+        addProperty("raw", raw)
+        if (categoryId != null) addProperty("category", categoryId)
+        add("tags", com.google.gson.JsonArray().apply { tags.distinct().forEach { add(it) } })
+        addProperty("archetype", "regular")
+        if (draftKey != null) addProperty("draft_key", draftKey)
+    }, version)
 
     fun uploadImageBytes(bytes: ByteArray, fileName: String, mimeType: String = "image/png", expectedVersion: Long = SessionEpoch.current): Result<UploadResponse> {
         if (expectedVersion != SessionEpoch.current) return Result.failure(com.lgguan.linuxdo.plugin.net.StaleSessionException())
@@ -775,16 +708,35 @@ object DiscourseApiClient {
         return result.map { it.tags.map { tag -> tag.text.ifBlank { tag.id } } }
     }
 
-    fun searchTags(query: String): Result<List<TagItem>> {
-        val baseUrl = getBaseUrl()
-        val trimmed = query.trim()
-        val encoded = try {
-            java.net.URLEncoder.encode(trimmed, "UTF-8")
-        } catch (_: Exception) {
-            trimmed
-        }
-        val url = "$baseUrl/tags/filter/search.json?q=$encoded&limit=10"
-        val result = executeGet<TagSearchResultResponse>(url)
-        return result.map { it.results }
+    fun searchTags(query: String): Result<List<TagItem>> = searchComposerTags(query, null, emptyList()).map { it.results }
+
+    internal fun searchComposerTags(query: String, categoryId: Int?, selectedIds: List<String>): Result<TagSearchResultResponse> {
+        return executeGet(DiscourseUrls.composerTags(getBaseUrl(), query, categoryId, selectedIds))
+    }
+
+    internal fun listDrafts(offset: Int, version: Long): Result<List<com.lgguan.linuxdo.plugin.service.DraftEntry>> = runCatching {
+        SessionEpoch.requireCurrent(version)
+        val response = executeGet<JsonObject>("${getBaseUrl()}/drafts.json?offset=$offset&limit=50").getOrThrow()
+        SessionEpoch.requireCurrent(version)
+        com.lgguan.linuxdo.plugin.service.DraftEntry.parse(response)
+    }
+
+    private val capabilitiesCache = SessionCache<com.lgguan.linuxdo.plugin.model.ComposerCapabilities>()
+    internal fun composerCapabilities(): Result<com.lgguan.linuxdo.plugin.model.ComposerCapabilities> = runCatching {
+        capabilitiesCache.get()?.let { return@runCatching it }
+        val version = SessionEpoch.current
+        val html = readCooldown.read { runCatching {
+            val url = "${getBaseUrl()}/latest"
+            if (shouldUseJcefBridge()) LinuxDoJcefBridge.execute(LinuxDoJcefBridge.BridgeRequest(url = url,
+                headers = mapOf("Accept" to "text/html"), sessionVersion = version)).getOrThrow().body.orEmpty()
+            else LinuxDoHttpClient.getClient().newCall(Request.Builder().url(url).header("Accept", "text/html")
+                .tag(SessionEpoch.Stamp::class.java, SessionEpoch.Stamp(version)).build()).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                HttpFailure.classify(response.code, response.headers.toMap(), body)?.let { throw it }
+                body
+            }
+        } }.getOrThrow()
+        SessionEpoch.requireCurrent(version)
+        com.lgguan.linuxdo.plugin.model.ComposerCapabilities.parse(html).also { capabilitiesCache.put(version, it) }
     }
 }

@@ -142,5 +142,5 @@ class CloudflareChallengeException(message: String = "Cloudflare 安全验证未
 
 class RateLimitException(
     val retryAfterSeconds: Long = Constants.DEFAULT_CIRCUIT_BREAKER_COOLDOWN_SECONDS,
-    message: String = "论坛访问过于频繁 (HTTP 429)，已触发防风控安全熔断保护"
+    message: String = "已触发论坛请求频率限制 (HTTP 429)，请等待冷却结束后重试"
 ) : java.io.IOException(message)

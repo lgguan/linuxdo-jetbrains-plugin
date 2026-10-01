@@ -74,4 +74,14 @@ object DiscourseUrls {
     fun tags(baseUrl: String): String {
         return "$baseUrl/tags.json"
     }
+
+    fun composerTags(baseUrl: String, query: String, categoryId: Int?, selectedIds: List<String>): String {
+        fun encode(value: String) = URLEncoder.encode(value, StandardCharsets.UTF_8)
+        // Let Discourse use its site-configured result limit. A fixed client limit
+        // can exceed max_tag_search_results and makes even an empty search fail.
+        val params = mutableListOf("q=${encode(query.trim())}", "filterForInput=true")
+        if (categoryId != null) params.add("categoryId=$categoryId")
+        selectedIds.filter { it.toLongOrNull() != null }.forEach { params.add("selected_tag_ids[]=${encode(it)}") }
+        return "$baseUrl/tags/filter/search.json?${params.joinToString("&")}"
+    }
 }
