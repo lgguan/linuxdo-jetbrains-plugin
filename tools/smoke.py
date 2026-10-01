@@ -105,55 +105,67 @@ def host(args):
     output = BUILD / "host-smoke" / str(uuid.uuid4())
     plugins = output / "plugins"
     plugins.mkdir(parents=True)
+    # A recognized, empty config prevents first-run migration of personal settings.
+    options = output / "config/options"
+    options.mkdir(parents=True)
+    (options / "ide.general.xml").write_text('<application/>', encoding="utf-8")
     with zipfile.ZipFile(package) as archive:
         for name in archive.namelist():
             if not (plugins / name).resolve().is_relative_to(plugins.resolve()):
                 raise RuntimeError("Plugin ZIP contains an unsafe path")
         archive.extractall(plugins)
     classes = output / "test-classes"
-    compile_java(javac, os.pathsep.join([str(cef), cp]), classes, "IdePluginSmoke", "PluginCefSmoke")
+    ui = getattr(args, "ui", False)
+    starter = "IdeUiSmoke" if ui else "IdePluginSmoke"
+    command = "linuxdo-ui-smoke" if ui else "linuxdo-host-smoke"
+    compile_java(javac, os.pathsep.join([str(cef), cp]), classes, starter, *([] if ui else ["PluginCefSmoke"]))
     library = plugins / "linuxdo-host-smoke/lib/host-test.jar"
     library.parent.mkdir(parents=True)
     descriptor = ('<idea-plugin><id>linuxdo.host.smoke</id><name>LinuxDo Host Smoke</name>'
                   '<version>1</version><vendor>Local test</vendor><depends>com.intellij.modules.platform</depends>'
                   '<depends>com.lgguan.linuxdo.plugin</depends><extensions defaultExtensionNs="com.intellij">'
-                  '<appStarter id="linuxdo-host-smoke" implementation="IdePluginSmoke"/></extensions></idea-plugin>')
+                  f'<appStarter id="{command}" implementation="{starter}"/></extensions></idea-plugin>')
     with zipfile.ZipFile(library, "w") as archive:
         archive.writestr("META-INF/plugin.xml", descriptor)
         for file in classes.rglob("*.class"):
             archive.write(file, file.relative_to(classes).as_posix())
     report = output / "result.txt"
     vm_args = [arg.replace("%IDE_HOME%", str(home)) for arg in launch["additionalJvmArguments"]]
+    if getattr(args, "draft_bridge", None):
+        vm_args.append(f"-Dlinuxdo.draft.bridge={Path(args.draft_bridge).resolve()}")
     if args.native:
         vm_args += ["-Dlinuxdo.host.native=true", "-Dlinuxdo.host.smoke=true"]
     cp = os.pathsep.join(str(home / "lib" / name) for name in launch["bootClassPathJarNames"])
     print(f"HOST_SMOKE_ROOT={output}", flush=True)
-    run(java, *vm_args, "-Djava.awt.headless=true", "-Didea.is.internal=true", "-Didea.initially.ask.config=false",
+    run(java, *vm_args, f"-Djava.awt.headless={str(not ui).lower()}", "-Didea.is.internal=true", "-Dintellij.startup.wizard=false",
         f"-Didea.home.path={home}", f"-Didea.config.path={output / 'config'}", f"-Didea.system.path={output / 'system'}",
         f"-Didea.log.path={output / 'log'}", f"-Didea.plugins.path={plugins}", f"-Dlinuxdo.host.report={report}",
         "-Didea.trust.all.projects=true", "-Didea.paths.selector=LinuxDoHostSmoke", "-Djb.vmOptionsFile=",
-        "-Djava.system.class.loader=com.intellij.util.lang.PathClassLoader", "-cp", cp, launch["mainClass"], "linuxdo-host-smoke")
+        "-Djava.system.class.loader=com.intellij.util.lang.PathClassLoader", "-cp", cp, launch["mainClass"], command)
     result = report.read_text()
     print(result)
-    if "ERROR=" in result or "SUPPORTED=true" not in result or (args.native and "HOST_NATIVE_PASS=true" not in result):
+    if "ERROR=" in result or ("IDE_UI_PASS=true" if ui else "SUPPORTED=true") not in result or (args.native and "HOST_NATIVE_PASS=true" not in result):
         raise RuntimeError(f"Host smoke failed: {report}")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_subparsers(dest="mode", required=True)
-    for mode in ("private", "host"):
+    for mode in ("private", "host", "ui"):
         sub = modes.add_parser(mode)
         sub.add_argument("--online", action="store_true", help="Allow Gradle to download uncached dependencies")
         sub.add_argument("--ide-home", required=True, help="IDE directory or macOS .app")
         if mode == "private":
             sub.add_argument("--network", action="store_true", help="Also access public Linux Do pages (no login submission)")
             sub.add_argument("--doh-url", default="https://ldh.ddd.oaifree.com/query-dns")
-        if mode == "host":
+        if mode in ("host", "ui"):
             sub.add_argument("--plugin-zip")
             sub.add_argument("--native", action="store_true")
+        if mode == "ui":
+            sub.add_argument("--draft-bridge", help="Authorized draft-only browser handoff directory")
     args = parser.parse_args()
-    {"private": private, "host": host}[args.mode](args)
+    args.ui = args.mode == "ui"
+    {"private": private, "host": host, "ui": host}[args.mode](args)
 
 
 if __name__ == "__main__":

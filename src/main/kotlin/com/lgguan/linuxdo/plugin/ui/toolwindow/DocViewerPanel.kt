@@ -51,6 +51,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
     private var loadingPosts = false
     private var refreshingPosts = false
     private var loadingFloor = false
+    private val returnFloors = mutableMapOf<Long, Int>()
     private val publishedReplies = linkedMapOf<Long, com.lgguan.linuxdo.plugin.model.Post>()
     private var readingClock = com.lgguan.linuxdo.plugin.service.ReadingClock()
     private var readingVersion = com.lgguan.linuxdo.plugin.net.SessionEpoch.current
@@ -292,17 +293,32 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                             }
                         }
                     }
-                    "reply" -> {
+                    "navigationReturn" -> {
+                        val key = json?.get("key")?.asString
+                        val floor = json?.get("floor")?.asInt ?: 0
+                        ApplicationManager.getApplication().invokeLater {
+                            if (!disposed && key == pageKey && callbackEpoch == com.lgguan.linuxdo.plugin.net.SessionEpoch.current && floor > 0)
+                                currentTopic?.let { returnFloors[it.id] = floor }
+                        }
+                    }
+                    "quoteReply", "reply" -> {
                         val floor = json?.get("floor")?.asInt ?: rawPayload.split(":").getOrNull(1)?.toIntOrNull() ?: 1
                         val author = json?.get("author")?.asString ?: rawPayload.split(":").getOrNull(2) ?: ""
                         currentTopic?.let { topic ->
                             ApplicationManager.getApplication().invokeLater {
                             if (disposed || project.isDisposed || callbackGeneration != loadGeneration || callbackPage != browser.documentTrust.token || callbackEpoch != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
                                 val key = pageKey
-                                val dialog = CommitReplyDialog(project, topic.id, floor, author) { post ->
+                                val selectedPost = currentTopic?.postStream?.posts?.firstOrNull { it.postNumber == floor } ?: return@invokeLater
+                                if (!com.lgguan.linuxdo.plugin.service.LinuxDoAuthService.getInstance().isLoggedIn) {
+                                    openAuthDialog()
+                                    return@invokeLater
+                                }
+                                val selected = json?.get("text")?.asString.orEmpty()
+                                val quote = if (action == "quoteReply" && selected.isNotBlank() && selected.length <= 100_000)
+                                    com.lgguan.linuxdo.plugin.ui.dialog.DiscourseQuote.format(selectedPost.username, topic.id, floor, selected) else null
+                                CommitReplyDialog.open(project, topic.id, floor, selectedPost.username, selectedPost.id, quote) { post ->
                                     if (!disposed && key == pageKey) showPublishedReply(post)
                                 }
-                                dialog.show()
                             }
                         }
                     }
@@ -419,6 +435,12 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
 
     private fun buildBridgeScript(query: JBCefJSQuery): String = """
                         window.intellijBridge = {
+                            navigationReturn: function(key, floor) {
+                                ${query.inject(" JSON.stringify({ action: 'navigationReturn', key: key, floor: floor }) ")}
+                            },
+                            quoteReply: function(floor, text) {
+                                ${query.inject(" JSON.stringify({ action: 'quoteReply', floor: floor, text: text }) ")}
+                            },
                             readingSample: function(floors) {
                                 ${query.inject(" JSON.stringify({ action: 'readingSample', floors: floors }) ")}
                             },
@@ -733,7 +755,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                 targetPostNumber = targetPostNumber,
                 paginationScript = "window.linuxDoPage = " + com.google.gson.Gson().toJson(mapOf(
                     "highest" to (detail.highestPostNumber ?: detail.postStream.posts.maxOfOrNull { it.postNumber } ?: 1),
-                    "key" to pageKey, "stream" to detail.postStream.stream.orEmpty().map { it.toString() }
+                    "key" to pageKey, "returnFloor" to returnFloors[detail.id], "stream" to detail.postStream.stream.orEmpty().map { it.toString() }
                 )) + ";\n" + paginationSource
             )
 

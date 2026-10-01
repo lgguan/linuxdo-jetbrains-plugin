@@ -11,7 +11,7 @@ class LinuxDoDocMainPanel(private val project: Project) : JPanel(BorderLayout())
     val issueListPanel = IssueListPanel(
         project = project,
         onTopicSelected = { topic ->
-            LinuxDoEditorOpener.openTopic(project, topic.id, topic.title)
+            LinuxDoEditorOpener.openTopic(project, topic.id, topic.title, topic.searchPostNumber)
         },
         onBossKeyTriggered = {
             toggleBossKey()

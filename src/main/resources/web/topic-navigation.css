@@ -5,7 +5,7 @@ body { padding-bottom: 112px; }
     inset: auto 0 0;
     z-index: 50;
     display: grid;
-    grid-template-columns: auto auto minmax(72px, 1fr) auto;
+    grid-template-columns: auto auto minmax(72px, 1fr) auto auto;
     align-items: center;
     gap: 8px 16px;
     padding: 10px max(16px, calc((100vw - 980px) / 2));
@@ -44,6 +44,9 @@ body { padding-bottom: 112px; }
 .topic-nav-button { height: 30px; padding: 0 10px; }
 .topic-refresh-button { border-color: transparent; color: var(--comment); }
 .topic-jump-button { color: var(--link); }
+.topic-return-button { color: var(--comment); }
+.topic-quote-button { position: fixed; left: 16px; z-index: 60; background: var(--bg); color: var(--link); }
+.topic-quote-button[hidden] { display: none; }
 .topic-nav-button:hover:not(:disabled), .topic-load-button:hover:not(:disabled) { background: var(--code-bg); border-color: var(--link); }
 .topic-navigation :focus-visible, .topic-load-button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .topic-navigation :disabled, .topic-load-button:disabled { opacity: .5; cursor: default; }
@@ -57,5 +60,6 @@ body { padding-bottom: 112px; }
     .floor-progress-label { text-align: center; }
     .floor-progress-slider { grid-row: 2; grid-column: 1 / -1; }
     .floor-jump-controls { grid-row: 1; grid-column: 3; }
+    .topic-return-button { grid-row: 3; grid-column: 1 / -1; justify-self: start; }
     .topic-navigation input[type=text] { width: 60px; }
 }

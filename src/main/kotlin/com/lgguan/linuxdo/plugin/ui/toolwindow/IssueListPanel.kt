@@ -49,7 +49,15 @@ class IssueListPanel(
     private val topicListModel = DefaultListModel<Topic>()
     private val topicList = object : JBList<Topic>(topicListModel) {
         override fun getScrollableTracksViewportWidth() = true
+        override fun getToolTipText(event: MouseEvent): String? {
+            val index = locationToIndex(event.point)
+            if (index < 0 || getCellBounds(index, index)?.contains(event.point) != true) return null
+            val topic = topicListModel[index]
+            return "${topic.title} — ${topic.lastPostedAt ?: topic.bumpedAt ?: topic.createdAt ?: "时间未知"}"
+        }
     }
+    private val listScrollPane = JBScrollPane(topicList)
+    private var displayedCondition: String? = null
 
     private val categoryComboBox = ComboBox<CategoryItem>()
     private val filterComboBox = ComboBox(Constants.TopicFilter.values())
@@ -341,7 +349,8 @@ class IssueListPanel(
         // Center Area: List vs Empty State
         topicList.cellRenderer = TopicCardCellRenderer()
         topicList.selectionMode = ListSelectionModel.SINGLE_SELECTION
-        val scrollPane = JBScrollPane(topicList)
+        val scrollPane = listScrollPane
+        topicList.toolTipText = ""
 
         setupEmptyStatePanel()
 
@@ -557,14 +566,12 @@ class IssueListPanel(
         categoryComboBox.addActionListener {
             if (!isUpdatingDropdown) {
                 activeSearchQuery = null
-                topicListModel.clear()
                 refreshList()
             }
         }
         filterComboBox.addActionListener {
             if (!isUpdatingDropdown) {
                 activeSearchQuery = null
-                topicListModel.clear()
                 refreshList()
             }
         }
@@ -601,12 +608,27 @@ class IssueListPanel(
                 }
             }
         })
+        searchField.document.addDocumentListener(object : javax.swing.event.DocumentListener {
+            override fun insertUpdate(e: javax.swing.event.DocumentEvent?) = invalidate()
+            override fun removeUpdate(e: javax.swing.event.DocumentEvent?) = invalidate()
+            override fun changedUpdate(e: javax.swing.event.DocumentEvent?) = invalidate()
+            private fun invalidate() {
+                requestGeneration++
+                listTask?.cancel(true)
+                finishLoading()
+                retryRequest = null
+                retryButton.isVisible = false
+                loadMoreButton.isEnabled = false
+            }
+        })
 
         LinuxDoAuthService.getInstance().addAuthListener(listenerLifetime) {
             if (disposed) return@addAuthListener
             requestGeneration++
             listTask?.cancel(true)
             topicListModel.clear()
+            displayedCondition = null
+            activeSearchQuery = null
             updateAuthDisplay()
             // Supersede the invalidated request so the loading indicator cannot be
             // left running when startup verification or an account switch completes.
@@ -772,7 +794,6 @@ class IssueListPanel(
             categoryComboBox.toolTipText = if (service.categoriesAreCurrent) "选择话题分类"
                 else "分类加载失败，点击工具栏刷新可重试；仍可浏览全部话题"
             if (selectedBefore != (categoryComboBox.selectedItem as? CategoryItem)?.id && activeSearchQuery == null) {
-                topicListModel.clear()
                 refreshList()
             }
         }
@@ -828,16 +849,28 @@ class IssueListPanel(
     }
 
     fun refreshList() {
-        activeSearchQuery?.let {
-            search(it)
+        if (activeSearchQuery != null) {
+            executeSearch()
             return
         }
         loadPage(0)
     }
 
     private fun loadMore() {
-        if (!hasMorePages || isLoading || activeSearchQuery != null) return
-        loadPage(currentPage + 1)
+        if (!hasMorePages || isLoading) return
+        val query = activeSearchQuery
+        if (query != null) {
+            if (query == searchField.text.trim()) loadSearchPage(query, currentPage + 1)
+        } else loadPage(currentPage + 1)
+    }
+
+    private fun applyTopics(topics: List<Topic>, condition: String, refresh: Boolean) {
+        val same = condition == displayedCondition
+        val current = (0 until topicListModel.size()).map { topicListModel[it] }
+        val next = if (same) com.lgguan.linuxdo.plugin.model.TopicBrowsing.merge(current, topics, refresh)
+            else topics.distinctBy { it.id }
+        TopicListReconciler.apply(topicList, topicListModel, listScrollPane, next, same)
+        displayedCondition = condition
     }
 
     private fun loadPage(page: Int) {
@@ -854,6 +887,7 @@ class IssueListPanel(
         val selectedCatItem = categoryComboBox.selectedItem as? CategoryItem
         val category = selectedCatItem?.id?.let { LinuxDoTopicService.getInstance().getCategory(it) }
         val filter = filterComboBox.selectedItem as? Constants.TopicFilter ?: Constants.TopicFilter.LATEST
+        val condition = "list:${selectedCatItem?.id}:$filter"
 
         listTask?.cancel(true)
         listTask = LinuxDoTopicService.getInstance().loadTopics(
@@ -864,17 +898,14 @@ class IssueListPanel(
                 if (disposed || project.isDisposed || generation != requestGeneration ||
                     session != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@loadTopics
                 finishLoading()
-                currentPage = page
-                hasMorePages = hasMore
-                loadMoreButton.isEnabled = hasMore
-                loadMoreButton.text = if (hasMore) "加载更多话题" else "已加载全部话题"
+                val preservingPages = page == 0 && displayedCondition == condition && topics.isNotEmpty()
+                val preservingTail = preservingPages && currentPage > 0
+                currentPage = if (preservingPages) currentPage else page
+                if (!preservingTail) hasMorePages = hasMore
+                loadMoreButton.isEnabled = hasMorePages
+                loadMoreButton.text = if (hasMorePages) "加载更多话题" else "已加载全部话题"
 
-                if (page == 0) {
-                    topicListModel.clear()
-                }
-                for (t in topics) {
-                    topicListModel.addElement(t)
-                }
+                applyTopics(topics, condition, refresh = page == 0)
 
                 if (topicListModel.isEmpty) {
                     updateEmptyState(isCf = false, isError = false)
@@ -900,38 +931,40 @@ class IssueListPanel(
         if (disposed || project.isDisposed) return
         val query = searchField.text.trim()
         if (query.isBlank()) {
-            if (activeSearchQuery != null) topicListModel.clear()
             activeSearchQuery = null
             refreshList()
             return
         }
+        activeSearchQuery = query
+        loadSearchPage(query, 1)
+    }
 
+    private fun loadSearchPage(query: String, page: Int) {
+        if (disposed || project.isDisposed || (isLoading && page > 1)) return
         val generation = ++requestGeneration
         val session = com.lgguan.linuxdo.plugin.net.SessionEpoch.current
-        if (activeSearchQuery != query) topicListModel.clear()
-        activeSearchQuery = query
-        currentPage = 0
-        hasMorePages = false
-        startLoading("正在搜索话题…")
+        val condition = "search:$query"
+        startLoading(if (page > 1) "正在加载更多搜索结果…" else "正在搜索话题…")
         emptyTipIcon.icon = AllIcons.Actions.Search
         updateDescText("正在查找符合条件的话题，请稍候。")
 
         listTask?.cancel(true)
         listTask = backgroundTasks.submit {
-            val result = try { DiscourseApiClient.search(query, 1) }
+            val result = try { DiscourseApiClient.search(query, page) }
                 catch (error: Exception) { Result.failure(error) }
             ApplicationManager.getApplication().invokeLater {
                 if (disposed || project.isDisposed || generation != requestGeneration ||
                     session != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
                 finishLoading()
                 result.onSuccess { searchResult ->
-                    val topics = searchResult.topics ?: emptyList()
-                    topicListModel.clear()
-                    for (t in topics) {
-                        topicListModel.addElement(t)
-                    }
-                    loadMoreButton.text = "找到 ${topics.size} 个话题"
-                    loadMoreButton.isEnabled = false
+                    val topics = com.lgguan.linuxdo.plugin.model.TopicBrowsing.searchTopics(searchResult)
+                    val preservingPages = page == 1 && displayedCondition == condition && topics.isNotEmpty()
+                    val preservingTail = preservingPages && currentPage > 1
+                    currentPage = if (preservingPages) currentPage.coerceAtLeast(1) else page
+                    if (!preservingTail) hasMorePages = !Regex("#?[0-9]+").matches(query) && searchResult.groupedSearchResult?.moreFullPageResults == true
+                    applyTopics(topics, condition, refresh = page == 1)
+                    loadMoreButton.text = if (hasMorePages) "加载更多搜索结果（${topicListModel.size()} 个话题）" else "找到 ${topicListModel.size()} 个话题"
+                    loadMoreButton.isEnabled = hasMorePages
 
                     if (topicListModel.isEmpty) {
                         updateEmptyState(isCf = false, isError = false)
@@ -940,7 +973,7 @@ class IssueListPanel(
                         showCard("LIST")
                     }
                 }.onFailure { err ->
-                    showLoadFailure(err) { search(query) }
+                    showLoadFailure(err) { loadSearchPage(query, page) }
                     if (topicListModel.isEmpty) {
                         if (err !is com.lgguan.linuxdo.plugin.net.CloudflareChallengeException &&
                             Regex("#?[0-9]+").matches(query) && err.message?.contains("404") == true) {

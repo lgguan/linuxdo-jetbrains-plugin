@@ -89,17 +89,22 @@ class ClipboardImageTest {
             override fun getTransferData(flavor: DataFlavor?): Any = testImage
         }
 
-        clipboard.setContents(imageTransferable, null)
+        val previous = clipboard.getContents(null)
+        try {
+            clipboard.setContents(imageTransferable, null)
 
-        assertTrue(clipboard.isDataFlavorAvailable(DataFlavor.imageFlavor))
-        val retrieved = clipboard.getData(DataFlavor.imageFlavor)
-        assertNotNull(retrieved)
-        println("Retrieved image class: ${retrieved.javaClass.name}")
+            assertTrue(clipboard.isDataFlavorAvailable(DataFlavor.imageFlavor))
+            val retrieved = clipboard.getData(DataFlavor.imageFlavor)
+            assertNotNull(retrieved)
+            println("Retrieved image class: ${retrieved.javaClass.name}")
 
-        val icon = ImageIcon(retrieved as Image)
-        println("Icon dimensions: ${icon.iconWidth}x${icon.iconHeight}")
-        assertEquals(200, icon.iconWidth)
-        assertEquals(150, icon.iconHeight)
+            val icon = ImageIcon(retrieved as Image)
+            println("Icon dimensions: ${icon.iconWidth}x${icon.iconHeight}")
+            assertEquals(200, icon.iconWidth)
+            assertEquals(150, icon.iconHeight)
+        } finally {
+            clipboard.setContents(previous ?: java.awt.datatransfer.StringSelection(""), null)
+        }
     }
 
     @Test
@@ -128,14 +133,20 @@ class ClipboardImageTest {
             override fun getTransferData(flavor: DataFlavor?): Any = listOf(tempFile)
         }
 
-        Toolkit.getDefaultToolkit().systemClipboard.setContents(fileListTransferable, null)
+        val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+        val previous = clipboard.getContents(null)
+        try {
+            clipboard.setContents(fileListTransferable, null)
 
-        val pasteAction = textArea.actionMap.get(javax.swing.text.DefaultEditorKit.pasteAction)
-        assertNotNull(pasteAction)
-        pasteAction.actionPerformed(java.awt.event.ActionEvent(textArea, java.awt.event.ActionEvent.ACTION_PERFORMED, "paste"))
+            val pasteAction = textArea.actionMap.get(javax.swing.text.DefaultEditorKit.pasteAction)
+            assertNotNull(pasteAction)
+            pasteAction.actionPerformed(java.awt.event.ActionEvent(textArea, java.awt.event.ActionEvent.ACTION_PERFORMED, "paste"))
 
-        println("Imported file list on pasteAction: $importedFileList")
-        assertTrue(importedFileList)
+            println("Imported file list on pasteAction: $importedFileList")
+            assertTrue(importedFileList)
+        } finally {
+            clipboard.setContents(previous ?: java.awt.datatransfer.StringSelection(""), null)
+        }
     }
 
     @Test
@@ -158,25 +169,25 @@ class ClipboardImageTest {
 
         val unvalidated = File.createTempFile("unvalidated-test-", ".png")
         try {
-            unvalidated.writeBytes(ByteArray(10) { 1 })
-            cache.put("unsafe", unvalidated.toURI().toString())
-            assertNull(cache.resolve("unsafe"))
-        } finally { unvalidated.delete() }
+                unvalidated.writeBytes(ByteArray(10) { 1 })
+                cache.put("unsafe", unvalidated.toURI().toString())
+                assertNull(cache.resolve("unsafe"))
+            } finally { unvalidated.delete() }
+        }
+
+        @Test
+        fun testLinuxDoImageCacheByteCaching() {
+            val cache = com.lgguan.linuxdo.plugin.common.LinuxDoImageCache
+            val img = BufferedImage(800, 600, BufferedImage.TYPE_INT_RGB)
+            val baos = ByteArrayOutputStream()
+            ImageIO.write(img, "png", baos)
+            val bytes = baos.toByteArray()
+
+            val cachedUri = cache.cacheImageBytes(bytes, "pasted-test.png")
+            assertTrue(cachedUri.startsWith("file:"))
+
+            val dimAttr = cache.getImageDimensionAttr(cachedUri, maxWidth = 450)
+            assertTrue(dimAttr.contains("width='450'"))
+            assertTrue(dimAttr.contains("height='337'"))
+        }
     }
-
-    @Test
-    fun testLinuxDoImageCacheByteCaching() {
-        val cache = com.lgguan.linuxdo.plugin.common.LinuxDoImageCache
-        val img = BufferedImage(800, 600, BufferedImage.TYPE_INT_RGB)
-        val baos = ByteArrayOutputStream()
-        ImageIO.write(img, "png", baos)
-        val bytes = baos.toByteArray()
-
-        val cachedUri = cache.cacheImageBytes(bytes, "pasted-test.png")
-        assertTrue(cachedUri.startsWith("file:"))
-
-        val dimAttr = cache.getImageDimensionAttr(cachedUri, maxWidth = 450)
-        assertTrue(dimAttr.contains("width='450'"))
-        assertTrue(dimAttr.contains("height='337'"))
-    }
-}

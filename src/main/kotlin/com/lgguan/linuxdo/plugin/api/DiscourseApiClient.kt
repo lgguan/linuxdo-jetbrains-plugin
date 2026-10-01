@@ -308,6 +308,39 @@ object DiscourseApiClient {
         )
     }
 
+    fun getPost(postId: Long): Result<Post> = executeGet("${getBaseUrl()}/posts/$postId.json")
+
+    internal fun readDraft(key: String, expectedVersion: Long): Result<JsonObject> = runCatching {
+        SessionEpoch.requireCurrent(expectedVersion)
+        val response = executeGet<JsonObject>("${getBaseUrl()}/drafts/$key.json").getOrThrow()
+        SessionEpoch.requireCurrent(expectedVersion)
+        response
+    }
+
+    internal fun writeDraft(key: String, sequence: Long, data: JsonObject?, expectedVersion: Long): Result<JsonObject> = runCatching {
+        SessionEpoch.requireCurrent(expectedVersion)
+        val csrf = getCsrfToken()
+        SessionEpoch.requireCurrent(expectedVersion)
+        val url = if (data == null) "${getBaseUrl()}/drafts/$key.json" else "${getBaseUrl()}/drafts.json"
+        val method = if (data == null) "DELETE" else "POST"
+        val form = FormBody.Builder().add("sequence", sequence.toString()).apply {
+            if (data != null) { add("draft_key", key); add("data", data.toString()) }
+        }.build()
+        if (shouldUseJcefBridge()) {
+            val encoded = (0 until form.size).joinToString("&") { "${form.encodedName(it)}=${form.encodedValue(it)}" }
+            val response = LinuxDoJcefBridge.executeForm(url, method, encoded, csrf, expectedVersion = expectedVersion).getOrThrow()
+            gson.fromJson(response.body, JsonObject::class.java)
+        } else {
+            executeWrite(csrf) { token ->
+                Request.Builder().tag(SessionEpoch.Stamp::class.java, SessionEpoch.Stamp(expectedVersion))
+                    .url(url).method(method, form).apply { token?.let { header("X-CSRF-Token", it) } }.build()
+            }.use { response ->
+                HttpFailure.classify(response.code, response.headers.toMap(), response.peekBody(1024).string())?.let { throw it }
+                gson.fromJson(response.body?.string(), JsonObject::class.java)
+            }
+        }.also { SessionEpoch.requireCurrent(expectedVersion) }
+    }
+
     fun getCurrentUser(): Result<UserInfo?> {
         val url = DiscourseUrls.currentUser(getBaseUrl())
         val result = executeGet<CurrentUserResponse>(url)

@@ -56,7 +56,10 @@ data class Topic(
     @SerializedName("unread_posts") val unreadPosts: Int = 0,
     @SerializedName("last_read_post_number") val lastReadPostNumber: Int? = null,
     @SerializedName("category_id") val categoryId: Int? = null,
-    @SerializedName("posters") val posters: List<TopicPoster>? = null
+    @SerializedName("posters") val posters: List<TopicPoster>? = null,
+    @SerializedName("tags") val tags: List<TopicTag>? = null,
+    @Transient val searchPostNumber: Int? = null,
+    @Transient val searchBlurb: String? = null
 )
 
 data class TopicPoster(
@@ -96,6 +99,7 @@ data class Post(
     @SerializedName("created_at") val createdAt: String? = null,
     @SerializedName("cooked") val cooked: String = "",
     @SerializedName("raw") val raw: String? = null,
+    @SerializedName("blurb") val blurb: String? = null,
     @SerializedName("post_number") val postNumber: Int = 1,
     @SerializedName("post_type") val postType: Int = 1,
     @SerializedName("reply_to_post_number") val replyToPostNumber: Int? = null,
@@ -190,6 +194,7 @@ data class SearchResultResponse(
 
 data class GroupedSearchResult(
     @SerializedName("more") val more: Boolean = false,
+    @SerializedName("more_full_page_results") val moreFullPageResults: Boolean = false,
     @SerializedName("term") val term: String? = null
 )
 

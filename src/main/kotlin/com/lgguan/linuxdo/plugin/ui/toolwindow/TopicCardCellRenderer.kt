@@ -17,6 +17,7 @@ class TopicCardCellRenderer : ListCellRenderer<Topic> {
     private val panel = JPanel(BorderLayout(0, 4))
     private val titleLabel = CustomLabel()
     private val metaLabel = CustomLabel()
+    private val summaryLabel = CustomLabel()
 
     init {
         panel.border = JBUI.Borders.empty(6, 10)
@@ -27,6 +28,7 @@ class TopicCardCellRenderer : ListCellRenderer<Topic> {
 
         panel.add(titleLabel, BorderLayout.NORTH)
         panel.add(metaLabel, BorderLayout.SOUTH)
+        panel.add(summaryLabel, BorderLayout.CENTER)
     }
 
     override fun getListCellRendererComponent(
@@ -86,14 +88,20 @@ class TopicCardCellRenderer : ListCellRenderer<Topic> {
         }
 
         // Meta info line: namespace • replies • views • time
-        val timeText = formatRelativeTime(value.bumpedAt ?: value.createdAt)
-        val metaText = "$namespace | ${value.replyCount} replies | ${value.views} views | $timeText"
+        val timeText = com.lgguan.linuxdo.plugin.theme.RelativeTime.format(value.lastPostedAt ?: value.bumpedAt ?: value.createdAt)
+        val tags = value.tags.orEmpty().joinToString(" ") { "#${it.name}" }
+        val unread = if (value.unreadPosts > 0) "${value.unreadPosts} 未读" else if (value.unseen) "新话题" else ""
+        val metaText = listOf(namespace, tags, unread, "${value.replyCount} replies", timeText).filter { it.isNotBlank() }.joinToString(" | ")
         metaLabel.text = metaText
         metaLabel.foreground = if (isSelected) {
             Color(Integer.valueOf(theme.selectionFgHex.removePrefix("#"), 16))
         } else {
             Color(Integer.valueOf(theme.commentHex.removePrefix("#"), 16))
         }
+        summaryLabel.text = value.searchBlurb?.let { org.jsoup.Jsoup.parse(it).text() }.orEmpty()
+        summaryLabel.isVisible = summaryLabel.text.isNotBlank()
+        summaryLabel.font = metaFont
+        summaryLabel.foreground = metaLabel.foreground
 
         return panel
     }
@@ -111,20 +119,10 @@ class TopicCardCellRenderer : ListCellRenderer<Topic> {
             .replace("&nbsp;", " ")
     }
 
-    private fun formatRelativeTime(timeStr: String?): String {
-        if (timeStr.isNullOrBlank()) return ""
-        return try {
-            val dateStr = timeStr.substringBefore("T")
-            val timePart = timeStr.substringAfter("T").substringBefore(".")
-            "$dateStr $timePart"
-        } catch (_: Exception) {
-            timeStr
-        }
-    }
-
     private class CustomLabel : javax.swing.JLabel() {
         init {
             border = JBUI.Borders.empty()
+            putClientProperty("html.disable", true)
         }
     }
 }

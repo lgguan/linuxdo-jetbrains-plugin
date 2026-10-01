@@ -18,6 +18,7 @@
     let queuedFloor = null;
     let navigationVersion = 0;
     let jumpSequence = 0;
+    let returnFloor = Number(config.returnFloor) || null;
     let highestFloor = Math.max(Number(config.highest) || 1, ...entries().map(el => Number(el.dataset.postNumber) || 1));
     let draggingFloor = false;
     let sliderTimer = null;
@@ -89,6 +90,11 @@
     jumpControls.className = 'floor-jump-controls';
     jumpControls.append(floorInput, jumpButton);
     floorForm.append(progressLabel, floorSlider, jumpControls);
+    const returnButton = document.createElement('button');
+    returnButton.type = 'button';
+    returnButton.className = 'topic-nav-button topic-return-button';
+    returnButton.onclick = () => { if (returnFloor) jump(returnFloor); };
+    floorForm.appendChild(returnButton);
     floorForm.onsubmit = event => { event.preventDefault(); jump(floorInput.value); };
     document.body.appendChild(floorForm);
     const refreshButtons = [];
@@ -139,6 +145,9 @@
         floorForm.classList.toggle('is-cooling-down', cooldownSeconds() > 0);
         jumpButton.disabled = cooldownSeconds() > 0 && !entries().some(el => Number(el.dataset.postNumber) === Number(floorInput.value));
         jumpButton.textContent = jumping ? '加载中…' : '跳转';
+        returnButton.textContent = returnFloor ? '返回 #' + returnFloor + ' 楼' : '返回跳转前位置';
+        returnButton.disabled = !returnFloor || !!busy || refreshing || !!jumping ||
+            (cooldownSeconds() > 0 && !entries().some(el => Number(el.dataset.postNumber) === returnFloor));
         updateProgress();
     }
     function request(direction, manual) {
@@ -179,7 +188,11 @@
         else if (refreshQueued) refresh();
         else schedule();
     }
-    function reveal(target, message) {
+    function reveal(target, message, fromFloor) {
+        if (fromFloor && Number(target.dataset.postNumber) !== fromFloor) {
+            returnFloor = fromFloor;
+            if (window.intellijBridge && window.intellijBridge.navigationReturn) window.intellijBridge.navigationReturn(config.key, returnFloor);
+        }
         prefetchArmed = false;
         revealedReplyId = target.dataset.postId;
         refreshMessage = message;
@@ -207,7 +220,7 @@
         navigationVersion++;
         if (busy || refreshing || jumping) { queuedFloor = floor; return true; }
         const existing = entries().find(el => Number(el.dataset.postNumber) === floor);
-        if (existing) { queuedFloor = null; clearTimeout(jumpTimer); reveal(existing, '已定位到 #' + floor + ' 楼'); if (refreshQueued) refresh(); return true; }
+        if (existing) { queuedFloor = null; clearTimeout(jumpTimer); reveal(existing, '已定位到 #' + floor + ' 楼', Number(readingAnchor()?.dataset.postNumber)); if (refreshQueued) refresh(); return true; }
         if (cooldownSeconds()) { update(); return false; }
         if (!window.linuxDoJumpFloor) return false;
         clearTimeout(jumpTimer);
@@ -224,7 +237,7 @@
         }
         queuedFloor = null;
         nextJumpAt = Date.now() + 800;
-        jumping = {id: String(++jumpSequence), floor, version: navigationVersion};
+        jumping = {id: String(++jumpSequence), floor, version: navigationVersion, fromFloor: Number(readingAnchor()?.dataset.postNumber)};
         refreshMessage = '正在加载 #' + floor + ' 楼…';
         update();
         window.linuxDoJumpFloor(config.key, jumping.id, floor);
@@ -284,7 +297,7 @@
             if (request.version !== navigationVersion && anchor) window.scrollBy(0, anchor.getBoundingClientRect().top - anchorTop);
             if (request.version === navigationVersion) {
                 const target = entries().find(el => Number(el.dataset.postNumber) === request.floor);
-                if (!error && target) reveal(target, '已定位到 #' + request.floor + ' 楼');
+                if (!error && target) reveal(target, '已定位到 #' + request.floor + ' 楼', request.fromFloor);
                 else {
                     refreshMessage = '无法加载 #' + request.floor + ' 楼，楼层可能不存在或无权查看；可点击跳转重试';
                     update();
@@ -377,6 +390,38 @@
         clearTimeout(sliderTimer); clearTimeout(jumpTimer); clearInterval(cooldownTimer);
     });
     addEventListener('resize', schedule);
+    const navResize = new ResizeObserver(() => { document.body.style.paddingBottom = (floorForm.offsetHeight + 24) + 'px'; });
+    navResize.observe(floorForm);
+    const quoteButton = document.createElement('button');
+    quoteButton.type = 'button';
+    quoteButton.textContent = '引用回复';
+    quoteButton.className = 'topic-nav-button topic-quote-button';
+    quoteButton.hidden = true;
+    document.body.appendChild(quoteButton);
+    let quoteSelection = null;
+    const containingPost = node => (node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement)?.closest('.post-content')?.closest('.post-entry');
+    document.addEventListener('selectionchange', () => {
+        const selection = getSelection();
+        const post = containingPost(selection?.anchorNode);
+        const end = containingPost(selection?.focusNode);
+        const text = selection?.toString() || '';
+        quoteSelection = post && post === end && text.trim() && text.length <= 100000 ? {floor: Number(post.dataset.postNumber), text} : null;
+        if (quoteSelection) {
+            const pre = (selection.anchorNode.nodeType === Node.ELEMENT_NODE ? selection.anchorNode : selection.anchorNode.parentElement).closest('pre');
+            if (pre && pre.contains(selection.focusNode)) {
+                const fence = '`'.repeat(Math.max(3, ...Array.from(text.matchAll(/`+/g), m => m[0].length + 1)));
+                quoteSelection.text = fence + '\n' + text + '\n' + fence;
+            }
+        }
+        quoteButton.hidden = !quoteSelection;
+        quoteButton.style.bottom = (floorForm.offsetHeight + 12) + 'px';
+    });
+    quoteButton.onmousedown = event => event.preventDefault();
+    quoteButton.onclick = () => {
+        if (quoteSelection && window.intellijBridge?.quoteReply) window.intellijBridge.quoteReply(quoteSelection.floor, quoteSelection.text);
+        quoteButton.hidden = true;
+    };
+    addEventListener('pagehide', () => navResize.disconnect());
     update();
     // Let initial last-read navigation settle before prefetching the visible edge.
     setTimeout(schedule, 1200);
