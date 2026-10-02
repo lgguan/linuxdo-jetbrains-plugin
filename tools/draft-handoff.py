@@ -172,7 +172,7 @@ def main():
             owned = (first["data"]["draft_sequence"], seed)
             with (root / "ide.log").open("w", encoding="utf-8") as log:
                 process = subprocess.Popen([sys.executable, str(ROOT / "tools/smoke.py"), "ui", "--ide-home", args.ide_home,
-                                            "--plugin-zip", str(ROOT / "build/distributions/linuxdo-jetbrains-plugin-1.0.0.zip"),
+                                            "--plugin-zip", str(ROOT / "build/distributions/linuxdo-jetbrains-plugin-1.0.1.zip"),
                                             "--draft-bridge", str(root)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
                 handled = set()
                 while process.poll() is None:

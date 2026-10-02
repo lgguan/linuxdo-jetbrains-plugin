@@ -36,7 +36,7 @@ def run_logged(report, *args):
 
 
 def prepare(online=False, package=False):
-    args = [GRADLE, "-I", "tools/smoke.init.gradle", "classes", "writeSmokeClasspath", "--console=plain"]
+    args = [GRADLE, "-Pkotlin.incremental=false", "-I", "tools/smoke.init.gradle", "classes", "writeSmokeClasspath", "--console=plain"]
     if package:
         args.append("buildPlugin")
     if not online:
@@ -81,7 +81,7 @@ def private(args):
     home, launch, java, javac, cef = ide_layout(args.ide_home)
     output = BUILD / "portable-smoke" / str(uuid.uuid4())
     cp = os.pathsep.join([str(output), str(cef), cp])
-    compile_java(javac, cp, output, "StandaloneSmokeApplication", "PluginCefSmoke", "PortableJcefSmoke", "PaginationSmoke")
+    compile_java(javac, cp, output, "StandaloneSmokeApplication", "PluginCefSmoke", "PortableJcefSmoke", "PaginationSmoke", "ResizeStressSmoke")
     properties = ["--enable-native-access=ALL-UNNAMED", "-Dfile.encoding=UTF-8",
                   "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8",
                   f"-Didea.system.path={output / 'system'}", f"-Didea.config.path={output / 'config'}",
@@ -94,15 +94,16 @@ def private(args):
                 properties.append(f"-Djna.boot.library.path={jna}")
             break
     print(f"SMOKE_ROOT={output}", flush=True)
-    run_logged(output / "result.txt", java, *properties, "-cp", cp, "PluginCefSmoke" if args.network else "PortableJcefSmoke",
-        *([args.doh_url] if args.network else []))
+    starter = "ResizeStressSmoke" if args.resize_stress else "PluginCefSmoke" if args.network else "PortableJcefSmoke"
+    run_logged(output / "result.txt", java, *properties, "-cp", cp, starter,
+        *([args.doh_url] if args.network else ["--recovery"] if args.recovery else []))
 
 
 def host(args):
     cp = prepare(args.online, package=not args.plugin_zip)
     home, launch, java, javac, cef = ide_layout(args.ide_home)
     package = Path(args.plugin_zip).resolve() if args.plugin_zip else Path((BUILD / "smoke-plugin-path.txt").read_text().strip())
-    output = BUILD / "host-smoke" / str(uuid.uuid4())
+    output = (Path(args.output_base).resolve() if args.output_base else BUILD / "host-smoke") / str(uuid.uuid4())
     plugins = output / "plugins"
     plugins.mkdir(parents=True)
     # A recognized, empty config prevents first-run migration of personal settings.
@@ -135,6 +136,8 @@ def host(args):
         vm_args.append("-Dlinuxdo.preview.live=true")
     if getattr(args, "showcase", False):
         vm_args.append("-Dlinuxdo.showcase=true")
+    if getattr(args, "reader_only", False):
+        vm_args.append("-Dlinuxdo.reader.only=true")
     if getattr(args, "draft_bridge", None):
         vm_args.append(f"-Dlinuxdo.draft.bridge={Path(args.draft_bridge).resolve()}")
     if args.native:
@@ -160,12 +163,16 @@ def main():
         sub.add_argument("--online", action="store_true", help="Allow Gradle to download uncached dependencies")
         sub.add_argument("--ide-home", required=True, help="IDE directory or macOS .app")
         if mode == "private":
+            sub.add_argument("--resize-stress", action="store_true", help="Stress displayed native frames with rapid resizing")
+            sub.add_argument("--recovery", action="store_true", help="Also terminate only the test runtime and verify recovery")
             sub.add_argument("--network", action="store_true", help="Also access public Linux Do pages (no login submission)")
             sub.add_argument("--doh-url", default="https://ldh.ddd.oaifree.com/query-dns")
         if mode in ("host", "ui"):
             sub.add_argument("--plugin-zip")
+            sub.add_argument("--output-base", help="Short directory for isolated IDE runs, avoiding Windows path limits")
             sub.add_argument("--native", action="store_true")
         if mode == "ui":
+            sub.add_argument("--reader-only", action="store_true", help="Run only the production reader UI regression")
             sub.add_argument("--showcase", action="store_true", help="Capture current production UI with sample data for README and Marketplace")
             sub.add_argument("--forum-preview", action="store_true", help="Read-only live forum front-end preview check; no draft or post writes")
             sub.add_argument("--draft-bridge", help="Authorized draft-only browser handoff directory")

@@ -17,8 +17,8 @@ class DocCamouflageCssBuilderTest {
 
     @Test
     fun `additional floors render as insertable fragments with existing actions`() {
-        val posts = listOf(Post(id = 901, username = "author", cooked = "<p>More content</p>", postNumber = 41))
-        val topic = TopicDetailResponse(id = 900, title = "Long topic", postStream = PostStream(posts, listOf(901)))
+        val posts = listOf(Post(id = 901, username = "author", cooked = "<p>More content</p>", postNumber = 41, actionsSummary=listOf(ActionSummary(2,canAct=true))))
+        val topic = TopicDetailResponse(id = 900, title = "Long topic", postStream = PostStream(posts, listOf(901)),details=com.lgguan.linuxdo.plugin.model.TopicPermissions(canCreatePost=true))
         val fragment = TopicDocumentRenderer.buildFullDocHtml(
             topic, posts, null, null, EditorColorSchemeAdapter.getCurrentThemeColors(),
             LinuxDoSettingsState(), currentUsername = "reader", fragmentOnly = true)
@@ -80,7 +80,10 @@ class DocCamouflageCssBuilderTest {
         assertTrue(html.contains("RFC 4040: JVM Metaspace 调优指南"))
         assertTrue(html.contains("Issue: #9999"))
         assertTrue(html.contains("dev.tuning")) // Namespace formatted
-        assertTrue(html.contains("[Original Specification #1] by @linuxer"))
+        val metadata = org.jsoup.Jsoup.parse(html).selectFirst(".floor-number")!!
+        assertEquals("#1", metadata.selectFirst(".floor-label")!!.text())
+        assertEquals("@linuxer", metadata.selectFirst("[data-reader-author]")!!.text())
+        assertFalse(metadata.text().contains("Original Specification"))
 
         // Verify image folding placeholder is present
         assertTrue(html.contains("[📷 Figure: arch.png"))
@@ -288,7 +291,7 @@ class DocCamouflageCssBuilderTest {
         assertTrue(html.contains("markFloorRead(777, 3)"))
 
         // Post 2 replies to Post 1, so MUST have clickable floor jump link to #1
-        assertTrue(html.contains("jumpToFloor(1)"))
+        assertTrue(html.contains("data-context-floor=\"1\""))
         assertTrue(html.contains("class=\"floor-jump-link\""))
 
         // All posts must have floor anchors
@@ -387,7 +390,7 @@ class DocCamouflageCssBuilderTest {
         val topic = TopicDetailResponse(
             id = 8888,
             title = "Test Own Post Actions",
-            postStream = PostStream(posts = listOf(myPostWithoutLikes, myPostWithLikes, otherPost))
+            postStream = PostStream(posts = listOf(myPostWithoutLikes, myPostWithLikes, otherPost)),details=com.lgguan.linuxdo.plugin.model.TopicPermissions(canCreatePost=true)
         )
 
         val html = TopicDocumentRenderer.buildFullDocHtml(

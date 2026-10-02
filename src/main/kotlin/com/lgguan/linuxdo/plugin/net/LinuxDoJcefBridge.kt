@@ -196,7 +196,7 @@ object LinuxDoJcefBridge : Disposable {
     private fun isDisposed(): Boolean {
         val b = browser ?: return true
         return try {
-            b.isDisposed
+            b.isDisposed || !b.runtime.isUsable
         } catch (_: Throwable) {
             true
         }
@@ -302,6 +302,15 @@ object LinuxDoJcefBridge : Disposable {
                     return@prepare
                 }
                 browser = b
+                b.onRuntimeFailure { reason ->
+                    synchronized(this@LinuxDoJcefBridge) {
+                        if (browser === b) {
+                            disposeInternal()
+                            state = BridgeState.FAILED
+                            lastFailureReason = reason
+                        }
+                    }
+                }
                 JcefNetworkTrace.install(b, "bridge-$generation")
 
                 val app = ApplicationManager.getApplication()
@@ -797,11 +806,11 @@ object LinuxDoJcefBridge : Disposable {
     /**
      * Typed GET helper
      */
-    inline fun <reified T> executeGet(url: String, headers: Map<String, String> = emptyMap(), traceId: String = NetworkTrace.newId()): Result<T> {
+    inline fun <reified T> executeGet(url: String, headers: Map<String, String> = emptyMap(), traceId: String = NetworkTrace.newId(), expectedVersion: Long = SessionEpoch.current): Result<T> {
         val reqHeaders = HashMap(headers).apply {
             putIfAbsent("Accept", "application/json")
         }
-        val req = BridgeRequest(requestId = traceId, url = url, method = "GET", headers = reqHeaders)
+        val req = BridgeRequest(requestId = traceId, url = url, method = "GET", headers = reqHeaders, sessionVersion = expectedVersion)
         val result = execute(req)
         return result.mapCatching { resp ->
             if (resp.status !in 200..299) {

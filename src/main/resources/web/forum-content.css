@@ -19,3 +19,64 @@ summary { cursor:pointer; color:var(--link); }
 .forum-unsupported { color:var(--comment); border-left:2px solid var(--border); padding-left:8px; }
 pre { white-space:pre; overflow:auto; }
 @media(max-width:480px) { aside.onebox,aside.quote { padding:8px; } }
+.forum-source-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:.8em; padding:4px 8px; background:var(--code-bg); }
+.forum-source-controls button,.forum-embed button { color:var(--link); background:transparent; border:1px solid var(--border); border-radius:3px; cursor:pointer; padding:3px 8px; }
+.forum-source-controls span { margin-right:auto; color:var(--comment); }
+.forum-code-block { margin:12px 0; border:1px solid var(--border); }
+.forum-code-block pre { margin:0; }
+pre.forum-code-wrap { white-space:pre-wrap; overflow-wrap:anywhere; }
+.forum-source-dialog { width:90vw; height:85vh; max-width:95vw; color:var(--fg); background:var(--bg); border:1px solid var(--border); overflow:auto; }
+.forum-source-dialog::backdrop { background:#0009; }
+.forum-source-output { overflow:auto; max-width:100%; padding:8px; }
+.forum-source-output svg { max-width:100%; height:auto; }
+.forum-render-error { color:var(--comment); }
+.forum-rendered-source { display:inline-block; max-width:100%; vertical-align:middle; }
+.forum-embed { border:1px solid var(--border); padding:12px; margin:12px 0; display:flex; flex-direction:column; gap:8px; }
+.hljs-keyword,.hljs-selector-tag,.hljs-literal,.hljs-type { color:var(--keyword); }
+.hljs-string,.hljs-regexp,.hljs-addition { color:var(--string); }
+.hljs-comment,.hljs-quote { color:var(--comment); }
+.hljs-number,.hljs-symbol,.hljs-built_in,.hljs-title { color:var(--link); }
+.floor-comment-header { display:block; }
+.floor-meta { width:100%; }
+.floor-actions { justify-content:flex-end; align-items:center; margin-top:10px; gap:6px; font:12px var(--code-font-family); }
+.floor-actions button.action-link,.floor-actions summary.action-link,.topic-reader-tools>summary {
+  box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; min-height:30px;
+  padding:4px 8px; gap:6px; border:1px solid var(--border); border-radius:5px; background:transparent; color:var(--comment); font:inherit; cursor:pointer; white-space:nowrap;
+}
+.reader-icon { width:16px; height:16px; flex-shrink:0; vertical-align:middle; }
+.floor-actions>button.action-link,.post-actions-menu>summary,.topic-reader-tools>summary { min-width:32px; }
+.action-count { font-variant-numeric:tabular-nums; }
+.floor-actions button.action-link:hover,.floor-actions summary.action-link:hover,.topic-reader-tools>summary:hover { color:var(--fg); border-color:var(--link); background:var(--code-bg); }
+.floor-actions button.liked { color:#e06c75; }
+.floor-actions .action-static { border:0; background:transparent; padding:4px 0; margin-right:auto; }
+.post-actions-menu { margin:0; padding:0; border:0; }
+.post-actions-menu>summary,.topic-reader-tools>summary { list-style:none; }
+.post-actions-menu>summary::-webkit-details-marker,.topic-reader-tools>summary::-webkit-details-marker { display:none; }
+.post-actions-menu-items,.topic-reader-menu { position:fixed; z-index:1000; max-height:min(440px,65vh); overflow:auto; padding:6px; border:1px solid var(--border); border-radius:5px; background:var(--bg); box-shadow:0 6px 24px #0004; }
+.post-actions-menu-items { box-sizing:border-box; width:min(220px,calc(100vw - 24px)); display:flex; flex-direction:column; gap:2px; }
+.post-actions-menu:not([open])>.post-actions-menu-items,.topic-reader-tools:not([open])>.topic-reader-menu { display:none; }
+.post-actions-menu-items button.action-link { width:100%; border-color:transparent; justify-content:flex-start; }
+.floor-actions :focus-visible,.topic-reader-tools summary:focus-visible { outline:2px solid var(--link); outline-offset:2px; }
+.doc-header { position:relative; padding-right:48px; }
+.topic-reader-tools { position:absolute; top:0; right:0; margin:0; padding:0; border:0; z-index:51; font:12px var(--code-font-family); }
+body>.topic-reader-tools { position:fixed; top:12px; right:12px; }
+.floor-number { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; }
+.floor-label,.floor-reply-context,.floor-number time { white-space:nowrap; }
+.topic-reader-menu { width:min(420px,calc(100vw - 24px)); display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; padding:12px; box-sizing:border-box; }
+.topic-reader-menu section { display:flex; flex-direction:column; gap:4px; }
+.topic-reader-menu section[hidden],.topic-reader-menu button[hidden] { display:none; }
+.topic-reader-menu strong { color:var(--comment); font-weight:normal; padding:4px 10px; }
+.topic-reader-menu .topic-nav-button { text-align:left; border-color:transparent; }
+.topic-reader-panel { position:fixed; z-index:10000; right:12px; top:12px; width:min(540px,calc(100vw - 24px)); max-height:75vh; overflow:auto; background:var(--bg); border:1px solid var(--border); padding:16px; box-shadow:0 8px 30px #0004; }
+.topic-reader-panel>label { display:flex; flex-direction:column; margin:12px 0; }
+.topic-reader-panel input,.topic-reader-panel select,.topic-reader-panel textarea { background:var(--code-bg); color:var(--fg); border:1px solid var(--border); padding:6px; max-width:100%; }
+.topic-reader-panel textarea { width:100%; min-height:100px; }
+.topic-reader-panel>button { margin:4px; }
+.topic-reader-result { border-bottom:1px solid var(--border); padding:8px; }
+.post-operation-pending .floor-actions { pointer-events:none; opacity:.6; }
+.reader-poll { margin:12px 0; border:1px solid var(--border); padding:12px; }
+.reader-poll label { display:flex; align-items:center; gap:8px; margin:6px 0; }
+.doc-image-menu { position:fixed; z-index:1000000; padding:6px; background:var(--bg); border:1px solid var(--border); box-shadow:0 4px 20px #0005; display:flex; flex-direction:column; }
+.doc-image-menu button { background:transparent; color:var(--fg); border:0; text-align:left; padding:8px 16px; cursor:pointer; }
+.doc-image-menu button:hover,.doc-image-menu button:focus { background:var(--code-bg); }
+@media(max-width:600px) { .floor-actions { justify-content:flex-start; } }

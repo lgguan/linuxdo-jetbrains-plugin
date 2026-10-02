@@ -1,13 +1,14 @@
 /* Keep navigation outside the reading surface, with room for the final reply. */
-body { padding-bottom: 112px; }
+body { padding-bottom: 80px; }
 .topic-navigation {
     position: fixed;
     inset: auto 0 0;
     z-index: 50;
     display: grid;
-    grid-template-columns: auto auto minmax(72px, 1fr) auto auto;
+    grid-template-columns: auto auto auto minmax(60px, 1fr) auto auto;
+    grid-template-areas: "refresh status progress slider jump return";
     align-items: center;
-    gap: 8px 16px;
+    gap: 6px 10px;
     padding: 10px max(16px, calc((100vw - 980px) / 2));
     margin: 0;
     border-top: 1px solid var(--border);
@@ -18,9 +19,10 @@ body { padding-bottom: 112px; }
     line-height: 1.4;
     box-shadow: 0 -4px 16px #0000000a;
 }
-.floor-progress-label { color: var(--comment); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.floor-progress-slider { width: 100%; min-width: 0; margin: 0; accent-color: var(--link); cursor: pointer; }
-.floor-jump-controls { display: flex; gap: 6px; align-items: center; }
+.floor-progress-label { grid-area:progress; color: var(--comment); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.floor-progress-slider { grid-area:slider; width: 100%; min-width: 0; margin: 0; accent-color: var(--link); cursor: pointer; }
+.floor-jump-controls { grid-area:jump; display: flex; gap: 6px; align-items: center; }
+.floor-jump-controls[hidden],.floor-progress-slider[hidden],.topic-return-button[hidden] { display:none; }
 .topic-navigation input[type=text] {
     width: 68px;
     height: 30px;
@@ -41,25 +43,23 @@ body { padding-bottom: 112px; }
     white-space: nowrap;
     cursor: pointer;
 }
-.topic-nav-button { height: 30px; padding: 0 10px; }
-.topic-refresh-button { border-color: transparent; color: var(--comment); }
+.topic-nav-button { height: 30px; padding: 0 8px; display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+.topic-refresh-button { grid-area:refresh; border-color: transparent; color: var(--comment); }
 .topic-jump-button { color: var(--link); }
-.topic-return-button { color: var(--comment); }
+.topic-return-button { grid-area:return; color: var(--comment); }
 .topic-quote-button { position: fixed; left: 16px; z-index: 60; background: var(--bg); color: var(--link); }
 .topic-quote-button[hidden] { display: none; }
 .topic-nav-button:hover:not(:disabled), .topic-load-button:hover:not(:disabled) { background: var(--code-bg); border-color: var(--link); }
 .topic-navigation :focus-visible, .topic-load-button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .topic-navigation :disabled, .topic-load-button:disabled { opacity: .5; cursor: default; }
-.topic-navigation-status { grid-column: 1 / -1; color: var(--comment); font-size: 12px; }
+.topic-navigation-status { grid-area:status; max-width:240px; min-width:0; color: var(--comment); font-size: 12px; overflow-wrap:anywhere; }
 .topic-navigation-status[hidden] { display: none; }
 .is-cooling-down .topic-navigation-status { color: var(--fg); }
 .topic-load-button { display: block; margin: 12px auto; padding: 6px 12px; font-size: 12px; color: var(--comment); }
 @media (max-width: 600px) {
-    body { padding-bottom: 140px; }
-    .topic-navigation { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding: 10px 12px; }
+    body { padding-bottom: 120px; }
+    .topic-navigation { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas:"refresh status jump" "progress slider slider" "return return return"; gap: 6px; padding: 10px 12px; }
     .floor-progress-label { text-align: center; }
-    .floor-progress-slider { grid-row: 2; grid-column: 1 / -1; }
-    .floor-jump-controls { grid-row: 1; grid-column: 3; }
-    .topic-return-button { grid-row: 3; grid-column: 1 / -1; justify-self: start; }
+    .topic-return-button { justify-self: start; }
     .topic-navigation input[type=text] { width: 60px; }
 }

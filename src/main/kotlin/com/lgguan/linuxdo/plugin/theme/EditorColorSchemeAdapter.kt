@@ -25,9 +25,9 @@ object EditorColorSchemeAdapter {
 
     fun getCurrentThemeColors(): ThemeColors {
         val scheme = try { EditorColorsManager.getInstance()?.globalScheme } catch (_: Throwable) { null }
-        val isDark = try { !JBColor.isBright() } catch (_: Throwable) { true }
-
-        val bg = scheme?.defaultBackground ?: (if (isDark) Color(0x2B, 0x2D, 0x30) else Color(0xF8, 0xF9, 0xFA))
+        val uiDark = try { !JBColor.isBright() } catch (_: Throwable) { true }
+        val bg = scheme?.defaultBackground ?: (if (uiDark) Color(0x2B, 0x2D, 0x30) else Color(0xF8, 0xF9, 0xFA))
+        val isDark = ColorUtil.isDark(bg)
         val fg = scheme?.defaultForeground ?: (if (isDark) Color(0xDF, 0xE1, 0xE5) else Color(0x1F, 0x23, 0x28))
         val comment = scheme?.getColor(EditorColors.LINE_NUMBERS_COLOR)
             ?: (if (isDark) Color(0x7A, 0x7E, 0x85) else Color(0x6E, 0x77, 0x81))

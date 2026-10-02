@@ -45,6 +45,11 @@ class IssueListPanel(
 
     private val listenerLifetime = com.intellij.openapi.util.Disposer.newDisposable()
     @Volatile private var disposed = false
+    private var observedAuthSession = com.lgguan.linuxdo.plugin.net.SessionEpoch.current
+    private var observedAuthUser = LinuxDoAuthService.getInstance().currentUser?.id
+    private val authRefreshTimer = Timer(120) {
+        if (!disposed && !project.isDisposed && LinuxDoAuthService.getInstance().status != LinuxDoAuthService.Status.CREDENTIALS_PENDING) loadInitialData()
+    }.apply { isRepeats = false }
 
     private val topicListModel = DefaultListModel<Topic>()
     private val topicList = object : JBList<Topic>(topicListModel) {
@@ -596,8 +601,6 @@ class IssueListPanel(
             )
             if (choice == Messages.YES) {
                 LinuxDoAuthService.getInstance().logout()
-                updateAuthDisplay()
-                refreshList()
             }
         }
 
@@ -624,15 +627,26 @@ class IssueListPanel(
 
         LinuxDoAuthService.getInstance().addAuthListener(listenerLifetime) {
             if (disposed) return@addAuthListener
+            updateAuthDisplay()
+            val auth = LinuxDoAuthService.getInstance()
+            val session = auth.sessionVersion
+            val user = auth.currentUser?.id
+            if (session == observedAuthSession && user == observedAuthUser) return@addAuthListener
+            val accountChanged = session != observedAuthSession
+            observedAuthSession = session
+            observedAuthUser = user
             requestGeneration++
             listTask?.cancel(true)
-            topicListModel.clear()
-            displayedCondition = null
-            activeSearchQuery = null
-            updateAuthDisplay()
-            // Supersede the invalidated request so the loading indicator cannot be
-            // left running when startup verification or an account switch completes.
-            loadInitialData()
+            finishLoading()
+            if (accountChanged) {
+                topicListModel.clear()
+                displayedCondition = null
+                activeSearchQuery = null
+            }
+            authRefreshTimer.stop()
+            // Credential import and successful verification are separate events.
+            // Wait for confirmation; the dialog callback shares this one refresh timer.
+            if (auth.status != LinuxDoAuthService.Status.CREDENTIALS_PENDING) refreshAfterAuthentication()
         }
 
         LinuxDoTopicService.getInstance().addCategoryListener(listenerLifetime) { list ->
@@ -666,7 +680,7 @@ class IssueListPanel(
         try {
             val dialog = LoginAuthDialog(project) {
                 updateAuthDisplay()
-                refreshList()
+                refreshAfterAuthentication()
             }
             dialog.show()
             updateAuthDisplay()
@@ -674,6 +688,10 @@ class IssueListPanel(
             com.intellij.openapi.diagnostic.Logger.getInstance(IssueListPanel::class.java).error("Failed to open login dialog", t)
             Messages.showErrorDialog(project, "打开登录界面失败: ${t.message ?: t.javaClass.simpleName}", "登录错误")
         }
+    }
+
+    private fun refreshAfterAuthentication() {
+        if (!disposed && !project.isDisposed) authRefreshTimer.restart()
     }
 
     private fun openNetworkOrProxyDiagnostic() {
@@ -987,6 +1005,7 @@ class IssueListPanel(
         }
     }
     override fun dispose() {
+        authRefreshTimer.stop()
         disposed = true
         requestGeneration++
         categoryRequestGeneration++

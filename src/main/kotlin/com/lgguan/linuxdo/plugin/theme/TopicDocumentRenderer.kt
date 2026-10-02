@@ -56,7 +56,8 @@ object TopicDocumentRenderer {
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <base href="https://linux.do/">
-                <style>$css</style>
+                <style id="linuxdo-reader-theme">$css</style>
+                ${RenderAssets.tags}
                 $bridgeScriptTag
                 <script>
                     function jumpToFloor(floorNum) {
@@ -147,12 +148,22 @@ object TopicDocumentRenderer {
                         }
                     }
 
-                    window.markFloorRead = function(topicId, floorNum) {
-                        var dot = document.querySelector('#dot-floor-' + floorNum + ', [data-floor="' + floorNum + '"]');
-                        if (dot) {
-                            dot.classList.add('read');
-                            dot.style.display = 'none';
+                    var docReadFloors = new Set();
+                    window.applyDocRead = function(floors) {
+                        floors.forEach(function(floorNum) {
+                            docReadFloors.add(Number(floorNum));
+                            var dot = document.querySelector('#dot-floor-' + floorNum + ', [data-floor="' + floorNum + '"]');
+                            if (dot) { dot.classList.add('read'); dot.style.display = 'none'; }
+                        });
+                        var page = window.linuxDoPage;
+                        if (page && page.unreadFloor) {
+                            while (docReadFloors.has(Number(page.unreadFloor))) page.unreadFloor++;
+                            if (page.unreadFloor > (window.linuxDoPagination ? window.linuxDoPagination.lastFloor() : page.highest)) page.unreadFloor = null;
+                            if (window.refreshDocReaderTools) window.refreshDocReaderTools();
                         }
+                    };
+                    window.markFloorRead = function(topicId, floorNum) {
+                        window.applyDocRead([floorNum]);
                         if (window.intellijBridge && window.intellijBridge.reportPostRead) {
                             window.intellijBridge.reportPostRead(topicId, floorNum);
                         }
@@ -161,10 +172,12 @@ object TopicDocumentRenderer {
                     window.sampleDocReading = function() {
                         var floors = [];
                         if (document.visibilityState === 'visible' && document.hasFocus()) {
+                            var navigation = document.querySelector('.topic-navigation');
+                            var readingBottom = navigation ? Math.min(window.innerHeight, navigation.getBoundingClientRect().top) : window.innerHeight;
                             document.querySelectorAll('.post-entry').forEach(function(el) {
                                 var r = el.getBoundingClientRect();
-                                var visible = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
-                                if (visible >= Math.min(r.height, window.innerHeight) * 0.5 && r.right > 0 && r.left < window.innerWidth) {
+                                var visible = Math.min(r.bottom, readingBottom) - Math.max(r.top, 0);
+                                if (visible >= Math.min(r.height, readingBottom) * 0.5 && r.right > 0 && r.left < window.innerWidth) {
                                     floors.push(parseInt(el.getAttribute('data-post-number'), 10));
                                 }
                             });
@@ -211,6 +224,7 @@ object TopicDocumentRenderer {
 
                         var overlay = document.getElementById('img-lightbox-overlay');
                         var img = document.getElementById('img-lb-img');
+                        if (img) { img.setAttribute('data-orig-src', primaryUrl); img.setAttribute('data-thumb-src', fallbackUrl); }
                         var titleEl = document.getElementById('img-lb-title');
                         var zoomEl = document.getElementById('img-lb-zoom');
 
@@ -349,6 +363,7 @@ object TopicDocumentRenderer {
                         }
 
                         window.addEventListener('keydown', function(e) {
+                            if (e.ctrlKey || e.altKey || e.metaKey || e.target.closest('input,textarea,select,[contenteditable=true]')) return;
                             var overlay = document.getElementById('img-lightbox-overlay');
                             if (overlay && overlay.classList.contains('active')) {
                                 if (e.key === 'Escape') {
@@ -605,6 +620,7 @@ object TopicDocumentRenderer {
                         var quote = e.target.closest('.quote, aside.quote');
                         var quoteControls = e.target.closest('.quote-controls, .back');
                         if (quote && quoteControls) {
+                            if (window.linuxDoReaderBound) return;
                             var postNum = quote.getAttribute('data-post');
                             var quotedTopic = quote.getAttribute('data-topic');
                             if (quotedTopic && quotedTopic !== '${topic.id}' && /^\d+$/.test(quotedTopic) && /^\d+$/.test(postNum || '')) {
@@ -807,6 +823,7 @@ object TopicDocumentRenderer {
                 <script>${ForumContent.script}
                     $enhancementsScript</script>
                 <script>$paginationScript</script>
+                <script>${requireNotNull(javaClass.getResource("/web/topic-reader.js")).readText()}</script>
             </body>
             </html>
         """.trimIndent()
@@ -823,7 +840,6 @@ object TopicDocumentRenderer {
         for (post in posts) {
             val author = escapeHtml(post.username)
             val authorJs = escapeHtml(com.google.gson.Gson().toJson(post.username))
-            val isFirst = post.postNumber == 1
             val likeCount = post.getLikeCount()
             val isLiked = post.isLiked()
 
@@ -837,31 +853,53 @@ object TopicDocumentRenderer {
             val dotHtml = if (isUnread) """<span class="unread-dot" id="dot-floor-${post.postNumber}" data-floor="${post.postNumber}" onclick="event.stopPropagation(); markFloorRead(${topic.id}, ${post.postNumber});" title="未读楼层 (点击标记已读)"></span>""" else ""
 
             val inReplyText = if (post.replyToPostNumber != null && post.replyToPostNumber > 0) {
-                """ in reply to <span class="floor-jump-link" onclick="jumpToFloor(${post.replyToPostNumber})" title="点击跳转至 #${post.replyToPostNumber} 楼">#${post.replyToPostNumber}</span>"""
+                """<span class="floor-reply-context">回复 <span class="floor-jump-link" data-context-floor="${post.replyToPostNumber}" title="查看 #${post.replyToPostNumber} 楼上下文">#${post.replyToPostNumber}</span></span>"""
             } else ""
 
             val time = """<time class="relative-time" datetime="${escapeHtml(post.createdAt ?: "")}" title="${escapeHtml(post.createdAt ?: "")}">${RelativeTime.format(post.createdAt)}</time>"""
-            val floorComment = if (isFirst) {
-                "// --- [Original Specification #1] by @$author at $time ---"
-            } else {
-                "// --- [Revision #${post.postNumber}] by @$author$inReplyText at $time ---"
-            }
+            val floorComment = """<span class="floor-label">#${post.postNumber}</span><span class="action-link" data-reader-author="$author">@$author</span>$inReplyText$time"""
 
-            val isMyPost = !currentUsername.isNullOrBlank() && post.username.equals(currentUsername, ignoreCase = true)
+            val isMyPost = post.yours == true
 
             val actionItems = mutableListOf<String>()
-            if (isMyPost) {
+            val moreItems = mutableListOf<String>()
+            if (isMyPost || !com.lgguan.linuxdo.plugin.model.PostCapabilities.like(post, !isLiked)) {
                 if (likeCount > 0) {
                     actionItems.add("""<span class="action-static" title="获赞数">♥ $likeCount</span>""")
                 }
             } else {
-                val likeText = if (likeCount > 0) "♥ $likeCount" else "♡ Like"
+                val likeText = if (isLiked) "已赞" else "点赞"
                 val likedClass = if (isLiked) "action-link liked" else "action-link"
-                actionItems.add("""<span class="$likedClass" onclick="toggleLikeUi(this, ${post.id}, ${!isLiked})">$likeText</span>""")
-                actionItems.add("""<span class="action-link" onclick="window.intellijBridge && window.intellijBridge.boostPost(${post.id}, ${post.postNumber}, $authorJs)">🚀 Boost</span>""")
+                val countHtml = if (likeCount > 0) "<span class=\"action-count\">$likeCount</span>" else ""
+                actionItems.add("""<button type="button" class="$likedClass" title="$likeText" aria-label="$likeText" aria-pressed="$isLiked" onclick="toggleLikeUi(this, ${post.id}, ${!isLiked})">${ReaderIcons.svg("like")}$countHtml</button>""")
+                if (com.lgguan.linuxdo.plugin.model.PostCapabilities.reply(topic)) actionItems.add("""<button type="button" class="action-link" data-post-command="boost" title="Boost：点赞并回复" aria-label="Boost" onclick="window.intellijBridge && window.intellijBridge.boostPost(${post.id}, ${post.postNumber}, $authorJs)">${ReaderIcons.svg("boost")}</button>""")
             }
-            actionItems.add("""<span class="action-link" onclick="window.intellijBridge && window.intellijBridge.replyPost(${post.postNumber}, $authorJs)">Reply</span>""")
-            actionItems.add("""<span class="action-link" onclick="window.intellijBridge && window.intellijBridge.copyPostLink(${topic.id}, ${post.postNumber})">Share</span>""")
+            if (com.lgguan.linuxdo.plugin.model.PostCapabilities.reply(topic)) actionItems.add("""<button type="button" class="action-link" title="回复" aria-label="回复" onclick="window.intellijBridge && window.intellijBridge.replyPost(${post.postNumber}, $authorJs)">${ReaderIcons.svg("reply")}</button>""")
+            moreItems.add("""<button type="button" class="action-link" data-post-command="share" onclick="window.intellijBridge && window.intellijBridge.copyPostLink(${topic.id}, ${post.postNumber})">${ReaderIcons.svg("share")}<span>分享</span></button>""")
+            fun control(action: String, label: String, enabled: Boolean, direction: String? = null) {
+                if (!enabled) return
+                val attribute=direction?.let { " data-direction=\"$it\"" }.orEmpty()
+                moreItems.add("""<button type="button" class="action-link" data-reader-action="$action"$attribute>${ReaderIcons.svg(action)}<span>$label</span></button>""")
+            }
+            control("bookmark", if (post.bookmarked == true) "已收藏" else "收藏", post.bookmarked != null && !currentUsername.isNullOrBlank())
+            control("edit", "编辑", post.canEdit == true)
+            control("history", "历史", post.canViewEditHistory == true)
+            control(if (post.canRecover == true) "recover" else "delete", if (post.canRecover == true) "恢复" else "删除", post.canRecover == true || post.canDelete == true)
+            control("flag", "举报", post.actionsSummary?.any { it.id != 2 && it.canAct == true } == true)
+            if (!topic.validReactions.isNullOrEmpty() || !post.reactions.isNullOrEmpty() || post.currentUserReaction != null)
+                control("reaction", "表情回应", !currentUsername.isNullOrBlank() && com.lgguan.linuxdo.plugin.model.PostCapabilities.reaction(post))
+            control("reactionUsers", "查看回应者", post.reactions?.any { it.count > 0 } == true)
+            if (post.replyCount > 0) control("replies", "${post.replyCount} 条回复", true)
+            if (post.canAcceptAnswer != null || post.canUnacceptAnswer != null || post.acceptedAnswer == true)
+                control(if (post.acceptedAnswer == true) "unaccept" else "accept", if (post.acceptedAnswer == true) "✓ 已采纳" else "采纳答案", if (post.acceptedAnswer == true) post.canUnacceptAnswer == true else post.canAcceptAnswer == true)
+            if (topic.isPostVoting == true && post.postNumber > 1 && post.replyToPostNumber == null) {
+                val allowed = !currentUsername.isNullOrBlank() && com.lgguan.linuxdo.plugin.model.PostCapabilities.postVote(topic,post)
+                control("postVote", "↑ ${post.postVotingVoteCount ?: 0}"+if(post.postVotingDirection=="up") " · 撤回赞成" else " · 赞成", allowed,"up")
+                control("postVote", "↓ "+if(post.postVotingDirection=="down") "撤回反对" else "反对", allowed,"down")
+            }
+
+            if (post.acceptedAnswer == true && post.canUnacceptAnswer != true) actionItems.add("""<span class="action-static">✓ 已采纳</span>""")
+            if (moreItems.isNotEmpty()) actionItems.add("""<details class="post-actions-menu"><summary class="action-link" title="更多帖子操作" aria-label="更多帖子操作">${ReaderIcons.svg("more")}</summary><div class="post-actions-menu-items">${moreItems.joinToString("\n")}</div></details>""")
 
             val actionsHtml = actionItems.joinToString("\n                            ")
             val avatarUrl = post.getAvatarUrl(48)
@@ -870,21 +908,21 @@ object TopicDocumentRenderer {
             } else ""
 
             postsHtml.append("""
-                <div class="post-entry" id="floor-${post.postNumber}" data-post-id="${post.id}" data-post-number="${post.postNumber}">
+                <div class="post-entry" id="floor-${post.postNumber}" data-post-id="${post.id}" data-post-number="${post.postNumber}" data-author="$author" data-polls="${escapeHtml(com.google.gson.Gson().toJson(post.polls.orEmpty()))}" data-poll-votes="${escapeHtml(com.google.gson.Gson().toJson(post.pollsVotes))}">
                     <a id="post-${post.id}"></a>
                     <a id="post-num-${post.postNumber}"></a>
                     <div class="floor-comment-header">
                         <div class="floor-meta">
                             $dotHtml$avatarHtml<span class="floor-number">$floorComment</span>
                         </div>
-                        <div class="floor-actions">
-                            $actionsHtml
-                        </div>
                     </div>
-                    <div class="post-content">
+                    <div class="post-content" data-source="${java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest((post.cooked + "\u0000" + post.raw.orEmpty()).toByteArray()))}">
                         ${ForumContent.render(ScrollableSourceBlocks.render(post.cooked, post.raw), settings.foldImages, post.id.toString(), "https://linux.do/t/${topic.id}/${post.postNumber}")}
                     </div>
                     ${renderBoosts(post)}
+                    <div class="floor-actions" aria-label="帖子操作">
+                        $actionsHtml
+                    </div>
                 </div>
             """.trimIndent())
         }

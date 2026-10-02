@@ -24,7 +24,17 @@
     </ul>
     ]]></description>
 
-    <change-notes><![CDATA[1.0.0: Initial public release, updated during review. Improved documentation-style post rendering, paginated search with matching excerpts, refresh position preservation and return navigation. Topics and replies share icon toolbars and on-demand preview, synchronize native forum drafts and retain content on errors or conflicts. New topics open directly or restore the single existing draft. Added searchable categories and a web-style tag picker with removable chips and usage counts; fixed tag limit errors and freezes when reopening the picker. Enlarged composer windows and distinguished forum rate limits from Cloudflare verification prompts. Includes private JCEF login, notifications, read progress, a boss key and LinuxDo DoH.]]></change-notes>
+    <change-notes><![CDATA[
+<h3>1.0.1</h3>
+<ul>
+<li>Fixed stale rendering during window resizing, browser startup hangs after disconnection, and blocked Windows IPC cleanup. Failed readers offer retry and restore the cached topic and floor.</li>
+<li>Compact, consistent icon actions show only currently available capabilities. Reading tools align with the document header; Share is inside More. Removed redundant floor labels and duplicate bookmark symbols.</li>
+<li>Post pages follow IDE themes and reading settings immediately. Login and verification trigger one topic-list refresh; foreground reading updates unread markers and synchronizes progress.</li>
+<li>Added bundled syntax highlighting, MathJax and Mermaid, enhanced image viewing, and controlled click-to-load video embeds.</li>
+<li>Added paginated topic search, author and popular-reply filters, quote context, a contents menu, bookmarks and notification levels. Long topics use bounded rendering and body caches.</li>
+<li>Server permissions govern reactions, editing, history, soft deletion, restoration, custom flags, polls and supported topic votes and accepted answers. Updates preserve reading position; failed likes do not reload the page.</li>
+</ul>
+]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.jcef</depends>

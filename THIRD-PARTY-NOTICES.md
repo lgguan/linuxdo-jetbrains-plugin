@@ -21,3 +21,6 @@ included under `META-INF/licenses/` in the plugin JAR. The IntelliJ Platform,
 Kotlin runtime and JBR/JCEF are supplied by the installed IDE and retain their
 own licenses; this ZIP does not redistribute them. JUnit and Gradle tooling are
 build/test dependencies and are not included in the plugin.
+# Offline reader assets
+
+The installation package includes highlight.js 11.11.1 (BSD-3-Clause), Mermaid 10.9.3 (MIT), and MathJax 3.2.2 (Apache-2.0). Their full licenses, exact source URLs and SHA-256 digests are in `web/vendor/` inside the plugin JAR. `verifyReaderAssets` checks scripts and license files before packaging. These libraries are served from the plugin resource handler; no runtime CDN requests are made.

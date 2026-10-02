@@ -63,7 +63,7 @@ public class PluginCefSmoke {
       else check(ApplicationManager.getApplication() != null, "REAL_IDE_APPLICATION");
       runtime = IsolatedCefRuntime.Companion.get();
       testBridge();
-      LinuxDoBrowser browser = new LinuxDoBrowser(runtime);
+      LinuxDoBrowser browser = new LinuxDoBrowser(runtime, false);
       JcefNetworkTrace.INSTANCE.install(browser, "smoke-login");
       browser.getComponent().setSize(1000, 720);
       LinuxDoJSQuery query = query(browser);
@@ -143,7 +143,7 @@ public class PluginCefSmoke {
       check(image != null, "PLUGIN_PAINT");
       javax.imageio.ImageIO.write(image, "png", new java.io.File("build/private-login-smoke.png"));
       String iconUrl = evaluate(browser, query, "({url:document.querySelector('link[rel=icon]').href})").get("url").getAsString();
-      LinuxDoBrowser document = new LinuxDoBrowser(runtime);
+      LinuxDoBrowser document = new LinuxDoBrowser(runtime, false);
       document.getComponent().setSize(1000, 720);
       LinuxDoJSQuery docQuery = query(document);
       CountDownLatch docReady = new CountDownLatch(1);

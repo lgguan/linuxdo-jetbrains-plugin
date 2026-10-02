@@ -24,6 +24,9 @@ class LinuxDoSettingsState : PersistentStateComponent<LinuxDoSettingsState> {
     var categoryNamespaceFormat: Boolean = true
     var autoJumpToLastReadFloor: Boolean = true
     var autoReportReadTimings: Boolean = true
+    var readingFontSize: Int = 0
+    var readingLineHeight: Double = 1.7
+    var readingWidth: Int = 980
 
     var userAgent: String = Constants.DEFAULT_USER_AGENT
     var requestTimeoutSeconds: Int = 15

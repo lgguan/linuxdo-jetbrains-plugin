@@ -73,17 +73,51 @@
         showDocToast('正在复制原图文件…');
         window.intellijBridge.copyImageFile(url);
     };
+    let imageMenu;
     document.addEventListener('contextmenu', function (event) {
         const img = event.target.closest('.post-content img, #img-lb-img');
         if (!img) return;
-        event.preventDefault();
-        window.copyDocImage(img);
+        event.preventDefault(); imageMenu?.remove();
+        imageMenu = document.createElement('div'); imageMenu.className = 'doc-image-menu'; imageMenu.setAttribute('role','menu');
+        const url = mediaUrl(img.getAttribute('data-orig-src') || img.closest('a.lightbox')?.href || img.currentSrc || img.src);
+        const item = (label, action) => { const b=document.createElement('button'); b.textContent=label;b.type='button';b.setAttribute('role','menuitem');b.onclick=()=>{imageMenu.remove();action();};imageMenu.append(b); };
+        item('复制图片',()=>window.copyDocImage(img));
+        item('复制原图文件',()=>window.copyDocImageFile(img));
+        item('复制图片地址',()=>window.intellijBridge?.copyCode(url,'image-url'));
+        item('保存图片',()=>window.intellijBridge?.saveImage(url));
+        document.body.append(imageMenu);
+        imageMenu.style.left = Math.max(0,Math.min(event.clientX,innerWidth-imageMenu.offsetWidth))+'px';
+        imageMenu.style.top = Math.max(0,Math.min(event.clientY,innerHeight-imageMenu.offsetHeight))+'px';
+        imageMenu.querySelector('button').focus();
+    });
+    document.addEventListener('click',e=>{if(!e.target.closest('.doc-image-menu'))imageMenu?.remove();});
+    document.addEventListener('keydown',e=>{if(e.key==='Escape')imageMenu?.remove();});
+    const originalOpen = window.openLightbox;
+    let gallery=[], galleryIndex=0;
+    window.openLightbox = function(src,title,event,fallback) {
+        const post=event?.target?.closest('.post-entry');
+        if(post){
+            gallery=Array.from(post.querySelectorAll('.post-content img')).filter(img=>!img.matches('.emoji,.avatar,.avatar-img,.site-icon')).map(img=>({src:mediaUrl(img.getAttribute('data-orig-src')||img.closest('a.lightbox')?.href||img.src),fallback:mediaUrl(img.getAttribute('data-thumb-src')||img.src),title:img.alt}));
+            galleryIndex=Math.max(0,gallery.findIndex(img=>img.src===mediaUrl(src)||img.fallback===mediaUrl(fallback)));
+        }
+        originalOpen(src,title,event,fallback);
+    };
+    window.lbStep = function(step) { if(!gallery.length)return;galleryIndex=(galleryIndex+step+gallery.length)%gallery.length;const img=gallery[galleryIndex];originalOpen(img.src,img.title,null,img.fallback); };
+    const toolbar=document.querySelector('.image-lightbox-tools');
+    if(toolbar){
+        for(const [label,action] of [['上一张',()=>window.lbStep(-1)],['下一张',()=>window.lbStep(1)],['复制地址',()=>window.intellijBridge?.copyCode(lbCurrentSrc,'image-url')],['保存',()=>window.intellijBridge?.saveImage(lbCurrentSrc)]]){
+            const b=document.createElement('button');b.type='button';b.className='lb-btn';b.textContent=label;b.onclick=action;toolbar.prepend(b);
+        }
+    }
+    document.addEventListener('keydown',event=>{
+        if(event.ctrlKey||event.altKey||event.metaKey||event.target.closest('input,textarea,select,[contenteditable=true]'))return;
+        if(document.getElementById('img-lightbox-overlay')?.classList.contains('active') && ['ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();window.lbStep(event.key==='ArrowLeft'?-1:1);}
     });
     let codeCopySequence = 0;
     const pendingCodeCopies = new Map();
     window.docCodeCopyResult = function (requestId, success) {
         const pending = pendingCodeCopies.get(requestId);
-        if (!pending) return;
+        if (!pending) { showDocToast(success ? '已复制' : '复制失败，请重试'); return; }
         pendingCodeCopies.delete(requestId);
         clearTimeout(pending.timer);
         pending.button.disabled = false;
@@ -91,83 +125,9 @@
         showDocToast(success ? '代码已复制' : '复制失败，请重试');
         if (success) setTimeout(() => { pending.button.textContent = '复制代码'; }, 1800);
     };
-    function prepareCodeBlocks(root) {
-        root.querySelectorAll('.post-content pre').forEach(pre => {
-            if (pre.dataset.docCopyReady) return;
-            pre.dataset.docCopyReady = 'true';
-            const wrapper = document.createElement('div');
-            wrapper.className = 'doc-code-block';
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'doc-code-copy';
-            button.textContent = '复制代码';
-            button.title = '复制完整代码，保留缩进和换行';
-            button.addEventListener('click', event => {
-                event.preventDefault();
-                event.stopPropagation();
-                if (!window.intellijBridge?.copyCode) {
-                    showDocToast('代码复制尚未就绪，请稍后重试');
-                    return;
-                }
-                const requestId = String(++codeCopySequence);
-                button.disabled = true;
-                button.textContent = '正在复制…';
-                const timer = setTimeout(() => window.docCodeCopyResult(requestId, false), 5000);
-                pendingCodeCopies.set(requestId, { button, timer });
-                // The floating button stays outside <pre>, so it never becomes part of the copied source.
-                try { window.intellijBridge.copyCode(pre.textContent, requestId); }
-                catch (_) { window.docCodeCopyResult(requestId, false); }
-            });
-            pre.before(wrapper);
-            wrapper.append(pre, button);
-        });
-    }
     function prepare(root) {
         updateTimes(root);
-        prepareCodeBlocks(root);
-        root.querySelectorAll('.post-content iframe').forEach(frame => {
-            if (frame.dataset.mediaReady) return;
-            frame.dataset.mediaReady = 'true';
-            const src = mediaUrl(frame.getAttribute('src') || frame.dataset.src);
-            if (!src) return;
-            const url = new URL(src);
-            const bili = url.hostname === 'player.bilibili.com';
-            const bvid = url.searchParams.get('bvid');
-            const aid = url.searchParams.get('aid');
-            let external = src;
-            if (bili && (/^BV[0-9a-z]+$/i.test(bvid || '') || /^\d+$/.test(aid || ''))) {
-                external = 'https://www.bilibili.com/video/' + (bvid || 'av' + aid) + '/';
-                const part = url.searchParams.get('p');
-                if (/^\d+$/.test(part || '')) external += '?p=' + part;
-            }
-            const supported = !!document.createElement('video').canPlayType('video/mp4; codecs="avc1.42E01E"') &&
-                !!document.createElement('audio').canPlayType('audio/mp4; codecs="mp4a.40.2"');
-            const link = document.createElement('a');
-            link.className = 'media-fallback';
-            link.href = external;
-            link.textContent = bili ? '在浏览器播放哔哩哔哩视频 ↗' : '在浏览器打开视频 ↗';
-            link.addEventListener('click', event => {
-                event.preventDefault();
-                event.stopPropagation();
-                window.intellijBridge?.openMedia(external);
-            });
-            if (bili && !supported) {
-                const card = document.createElement('div');
-                card.className = 'embedded-video-card';
-                const title = document.createElement('strong');
-                title.textContent = '哔哩哔哩视频';
-                const message = document.createElement('p');
-                message.textContent = '当前 IDE 不支持此视频编码，请在浏览器中播放。';
-                card.append(title, message, link);
-                frame.replaceWith(card);
-            } else {
-                frame.src = src;
-                frame.allowFullscreen = true;
-                frame.setAttribute('allow', 'fullscreen; picture-in-picture');
-                frame.classList.add('embedded-video-frame');
-                frame.after(link);
-            }
-        });
+        window.linuxDoEnhanceContent?.(root);
         root.querySelectorAll('.post-content [data-video-src]').forEach(placeholder => {
             if (placeholder.dataset.mediaReady) return;
             const src = mediaUrl(placeholder.getAttribute('data-video-src'));

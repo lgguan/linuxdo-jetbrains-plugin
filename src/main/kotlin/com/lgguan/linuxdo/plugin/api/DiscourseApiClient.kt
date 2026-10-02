@@ -170,20 +170,22 @@ object DiscourseApiClient {
 
     private val readCooldown = com.lgguan.linuxdo.plugin.net.ForumReadCooldown()
 
-    private inline fun <reified T> executeGet(url: String): Result<T> =
-        readCooldown.read { executeGetNow<T>(url) }
+    private inline fun <reified T> executeGet(url: String, version: Long = SessionEpoch.current): Result<T> =
+        readCooldown.read { executeGetNow<T>(url, version) }
 
-    private inline fun <reified T> executeGetNow(url: String): Result<T> {
+    private inline fun <reified T> executeGetNow(url: String, version: Long): Result<T> {
+        if (version != SessionEpoch.current) return Result.failure(com.lgguan.linuxdo.plugin.net.StaleSessionException())
         val traceId = NetworkTrace.newId()
         if (shouldUseJcefBridge()) {
             LinuxDoLog.info("Routing GET $url via JCEF (Chromium ECH) Bridge")
-            return LinuxDoJcefBridge.executeGet<T>(url, traceId = traceId)
+            return LinuxDoJcefBridge.executeGet<T>(url, traceId = traceId, expectedVersion = version)
         }
 
         val client = LinuxDoHttpClient.getClient()
         val startTime = System.currentTimeMillis()
         val request = Request.Builder()
             .tag(NetworkTrace.Id::class.java, NetworkTrace.Id(traceId))
+            .tag(SessionEpoch.Stamp::class.java, SessionEpoch.Stamp(version))
             .url(url)
             .get()
             .build()
@@ -205,7 +207,7 @@ object DiscourseApiClient {
             if (shouldUseJcefBridge(e)) {
                 LinuxDoLog.info("Auto-recovering GET $url via JCEF (Chromium ECH) Bridge...")
                 NetworkTrace.event(traceId, "JAVA", "engine_fallback", "target" to "JCEF", "errorType" to NetworkTrace.errorType(e))
-                return LinuxDoJcefBridge.executeGet<T>(url, traceId = traceId)
+                return LinuxDoJcefBridge.executeGet<T>(url, traceId = traceId, expectedVersion = version)
             }
             Result.failure(e)
         }
@@ -285,7 +287,7 @@ object DiscourseApiClient {
     }
 
     fun getTopicAroundPost(topicId: Long, postNumber: Int): Result<TopicDetailResponse> =
-        executeGet<TopicDetailResponse>("${getBaseUrl()}/t/$topicId/$postNumber.json").map(::withScrollableSources)
+        executeGet<TopicDetailResponse>("${getBaseUrl()}/t/$topicId/$postNumber.json?track_visit=false").map(::withScrollableSources)
 
     private fun withScrollableSources(topic: TopicDetailResponse): TopicDetailResponse =
         topic.copy(postStream = topic.postStream.copy(posts = topic.postStream.posts.map(::withScrollableSource)))
@@ -309,6 +311,62 @@ object DiscourseApiClient {
     }
 
     fun getPost(postId: Long): Result<Post> = executeGet("${getBaseUrl()}/posts/$postId.json")
+
+    internal fun readerGet(path: String, version: Long): Result<com.google.gson.JsonElement> = runCatching {
+        SessionEpoch.requireCurrent(version)
+        require(path.startsWith('/') && !path.startsWith("//") && !path.contains(".."))
+        executeGet<com.google.gson.JsonElement>(getBaseUrl() + path, version).getOrThrow().also { SessionEpoch.requireCurrent(version) }
+    }
+
+    /** A rejected CSRF token may be refreshed; an uncertain write is never replayed. */
+    internal fun readerWrite(path: String, method: String, data: JsonObject, version: Long): Result<com.google.gson.JsonElement> = runCatching {
+        SessionEpoch.requireCurrent(version)
+        require(path.startsWith('/') && !path.startsWith("//") && !path.contains(".."))
+        require(method in setOf("POST", "PUT", "DELETE"))
+        val csrf = getCsrfToken()
+        SessionEpoch.requireCurrent(version)
+        val url = getBaseUrl() + path
+        val body = data.toString()
+        val responseBody = if (shouldUseJcefBridge()) {
+            val response = LinuxDoJcefBridge.execute(LinuxDoJcefBridge.BridgeRequest(url = url, method = method,
+                headers = buildMap { put("Accept", "application/json"); put("Content-Type", "application/json"); csrf?.let { put("X-CSRF-Token", it) } },
+                body = body, sessionVersion = version)).getOrThrow()
+            HttpFailure.classify(response.status, response.headers.orEmpty(), response.body.orEmpty())?.let { throw it }
+            response.body.orEmpty()
+        } else {
+            executeWrite(csrf) { token -> Request.Builder().url(url).method(method, body.toRequestBody(JSON_MEDIA_TYPE))
+                .header("Accept", "application/json").apply { token?.let { header("X-CSRF-Token", it) } }
+                .tag(SessionEpoch.Stamp::class.java, SessionEpoch.Stamp(version)).build() }.use { response ->
+                val text = response.body?.string().orEmpty()
+                HttpFailure.classify(response.code, response.headers.toMap(), text)?.let { throw it }; text
+            }
+        }
+        SessionEpoch.requireCurrent(version)
+        parseReaderResponse(responseBody)
+    }
+
+    internal fun parseReaderResponse(body: String): com.google.gson.JsonElement {
+        val element=if(body.isBlank())JsonObject() else com.google.gson.JsonParser.parseString(body)
+        if(element.isJsonObject){
+            val data=element.asJsonObject;val success=data.get("success")
+            val errors=data.getAsJsonArray("errors")?.map { org.jsoup.Jsoup.parse(it.asString).text().take(2000) }.orEmpty()
+            if(errors.isNotEmpty() || (success?.isJsonPrimitive==true && success.asJsonPrimitive.isBoolean && !success.asBoolean))
+                throw com.lgguan.linuxdo.plugin.net.ForumValidationException(422, errors.ifEmpty { listOf(org.jsoup.Jsoup.parse(data.get("message")?.asString ?: "论坛拒绝此操作").text().take(2000)) })
+        }
+        return element
+    }
+
+    internal fun readerBootstrap(version: Long): Result<String> = readCooldown.read { runCatching {
+        SessionEpoch.requireCurrent(version)
+        val url = "${getBaseUrl()}/latest"
+        val html = if (shouldUseJcefBridge()) LinuxDoJcefBridge.execute(LinuxDoJcefBridge.BridgeRequest(url = url,
+            headers = mapOf("Accept" to "text/html"), sessionVersion = version)).getOrThrow().body.orEmpty()
+        else LinuxDoHttpClient.getClient().newCall(Request.Builder().url(url).header("Accept", "text/html")
+            .tag(SessionEpoch.Stamp::class.java, SessionEpoch.Stamp(version)).build()).execute().use { response ->
+            val text = response.body?.string().orEmpty(); HttpFailure.classify(response.code, response.headers.toMap(), text)?.let { throw it }; text
+        }
+        SessionEpoch.requireCurrent(version); html
+    } }
 
     internal fun readDraft(key: String, expectedVersion: Long): Result<JsonObject> = runCatching {
         SessionEpoch.requireCurrent(expectedVersion)

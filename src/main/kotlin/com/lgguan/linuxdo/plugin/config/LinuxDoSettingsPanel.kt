@@ -38,6 +38,9 @@ class LinuxDoSettingsPanel : com.intellij.openapi.Disposable {
     private val categoryNamespaceCheckBox = JBCheckBox("技术命名空间化版块分类 (例如将“开发调优”格式化为 dev.tuning)", true)
     private val autoJumpToLastReadFloorCheckBox = JBCheckBox("打开话题时自动跳转至上次阅读楼层 (自动记住历史进度并平滑定位)", true)
     private val autoReportTimingsCheckBox = JBCheckBox("自动向社区同步阅读进度与停留时长 (/topics/timings)", true)
+    private val readingFont = javax.swing.JSpinner(javax.swing.SpinnerNumberModel(0,0,32,1))
+    private val readingLine = javax.swing.JSpinner(javax.swing.SpinnerNumberModel(1.7,1.2,2.5,0.1))
+    private val readingWidth = javax.swing.JSpinner(javax.swing.SpinnerNumberModel(980,480,1600,20))
 
     // 2. DNS-over-HTTPS (DoH)
     private val dohProviderComboBox = ComboBox(Constants.DohProvider.values())
@@ -99,6 +102,9 @@ class LinuxDoSettingsPanel : com.intellij.openapi.Disposable {
         formBuilder.addComponent(categoryNamespaceCheckBox)
         formBuilder.addComponent(autoJumpToLastReadFloorCheckBox)
         formBuilder.addComponent(autoReportTimingsCheckBox)
+        formBuilder.addLabeledComponent("正文独立字号（0 = 沿用 IDE）:",readingFont)
+        formBuilder.addLabeledComponent("正文行距:",readingLine)
+        formBuilder.addLabeledComponent("正文阅读宽度 (px):",readingWidth)
         val camouflageTip = JBLabel("<html><small style='color:gray;'>* 开启代码伪装后，社区帖子将转换为规范 RFC 技术文档风格呈现，完美融入 IDE 编辑器与日常开发环境。</small></html>")
         formBuilder.addComponent(camouflageTip)
 
@@ -393,6 +399,9 @@ class LinuxDoSettingsPanel : com.intellij.openapi.Disposable {
         state.categoryNamespaceFormat = categoryNamespaceCheckBox.isSelected
         state.autoJumpToLastReadFloor = autoJumpToLastReadFloorCheckBox.isSelected
         state.autoReportReadTimings = autoReportTimingsCheckBox.isSelected
+        state.readingFontSize=(readingFont.value as Number).toInt().let { if(it==0)0 else it.coerceIn(12,32) }
+        state.readingLineHeight=(readingLine.value as Number).toDouble()
+        state.readingWidth=(readingWidth.value as Number).toInt()
 
         state.userAgent = userAgentField.text.trim()
         state.requestTimeoutSeconds = timeoutField.text.toIntOrNull() ?: 15
@@ -434,6 +443,9 @@ class LinuxDoSettingsPanel : com.intellij.openapi.Disposable {
         categoryNamespaceCheckBox.isSelected = state.categoryNamespaceFormat
         autoJumpToLastReadFloorCheckBox.isSelected = state.autoJumpToLastReadFloor
         autoReportTimingsCheckBox.isSelected = state.autoReportReadTimings
+        readingFont.value=state.readingFontSize
+        readingLine.value=state.readingLineHeight.coerceIn(1.2,2.5)
+        readingWidth.value=state.readingWidth.coerceIn(480,1600)
 
         userAgentField.text = state.userAgent
         timeoutField.text = state.requestTimeoutSeconds.toString()
@@ -469,6 +481,9 @@ class LinuxDoSettingsPanel : com.intellij.openapi.Disposable {
                 categoryNamespaceCheckBox.isSelected != state.categoryNamespaceFormat ||
                 autoJumpToLastReadFloorCheckBox.isSelected != state.autoJumpToLastReadFloor ||
                 autoReportTimingsCheckBox.isSelected != state.autoReportReadTimings ||
+                (readingFont.value as Number).toInt() != state.readingFontSize ||
+                (readingLine.value as Number).toDouble() != state.readingLineHeight ||
+                (readingWidth.value as Number).toInt() != state.readingWidth ||
                 userAgentField.text.trim() != state.userAgent ||
                 timeoutField.text.trim() != state.requestTimeoutSeconds.toString() ||
                 selectedMode != state.networkMode ||

@@ -33,10 +33,11 @@ internal object TopicRefresh {
         require(current.id == fresh.id) { "Topic changed during refresh" }
         val stream = requireNotNull(fresh.postStream.stream) { "Missing reply index" }.distinct()
         val visible = stream.toHashSet()
+        val updates = fresh.postStream.posts.associateBy { it.id }
         return fresh.copy(postStream = fresh.postStream.copy(
             stream = stream,
             // Fresh detail usually contains only the first batch. Load new posts through normal pagination.
-            posts = current.postStream.posts.filter { it.id in visible }.distinctBy { it.id }.sortedBy { it.postNumber }
+            posts = current.postStream.posts.filter { it.id in visible }.distinctBy { it.id }.map { updates[it.id] ?: it }.sortedBy { it.postNumber }
         ))
     }
 }

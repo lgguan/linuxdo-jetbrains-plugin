@@ -67,7 +67,9 @@ class LinuxDoReadTrackingService(
             !LinuxDoAuthService.getInstance().isLoggedIn || version != SessionEpoch.current) return
         ApplicationManager.getApplication()?.executeOnPooledThread {
             if (version == SessionEpoch.current && LinuxDoSettingsState.getInstance().autoReportReadTimings) {
-                DiscourseApiClient.reportTimings(topicId, timings.values.sum(), timings, version)
+                DiscourseApiClient.reportTimings(topicId, timings.values.sum(), timings, version).onFailure { error ->
+                    com.lgguan.linuxdo.plugin.common.LinuxDoLog.warn("已读同步失败，本地记录已保留：${error.javaClass.simpleName}")
+                }
             }
         }
     }

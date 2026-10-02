@@ -9,7 +9,7 @@ object DocCamouflageCssBuilder {
 
     fun buildCss(theme: EditorColorSchemeAdapter.ThemeColors, settings: LinuxDoSettingsState): String {
         val avatarDisplay = if (settings.hideAvatars) "none" else "inline-block"
-        val fontSize = (theme.fontSize + 2).coerceAtLeast(15)
+        val fontSize = if (settings.readingFontSize == 0) (theme.fontSize + 2).coerceAtLeast(15) else settings.readingFontSize.coerceIn(12, 32)
 
         val fgColor = if (theme.isDark) "#E6EDF3" else "#1F2328"
         val titleColor = if (theme.isDark) "#FFFFFF" else "#0A0C10"
@@ -22,6 +22,7 @@ object DocCamouflageCssBuilder {
                 --title-color: $titleColor;
                 --comment: $metaColor;
                 --keyword: ${theme.keywordHex};
+                --string: ${theme.linkHex};
                 --link: ${theme.linkHex};
                 --selection-bg: ${theme.selectionBgHex};
                 --selection-fg: ${theme.selectionFgHex};
@@ -41,14 +42,14 @@ object DocCamouflageCssBuilder {
                 color: var(--fg);
                 font-family: var(--font-family);
                 font-size: var(--font-size);
-                line-height: 1.7;
+                line-height: ${settings.readingLineHeight.coerceIn(1.2, 2.5)};
                 margin: 0;
                 padding: 16px 24px 40px 24px;
                 word-wrap: break-word;
             }
 
             .doc-container {
-                max-width: 980px;
+                max-width: ${settings.readingWidth.coerceIn(480, 1600)}px;
                 margin: 0 auto;
                 padding: 0;
                 width: 100%;
@@ -70,7 +71,7 @@ object DocCamouflageCssBuilder {
 
             /* Document Header (Javadoc / RFC Spec style) */
             .doc-header {
-                max-width: 980px;
+                max-width: 100%;
                 margin: 0 auto 16px auto;
                 padding-bottom: 10px;
                 border-bottom: 1px dashed var(--border);
@@ -97,7 +98,7 @@ object DocCamouflageCssBuilder {
 
             /* Post Floor / Block */
             .post-entry {
-                max-width: 980px;
+                max-width: 100%;
                 margin: 0 auto 16px auto;
                 padding-bottom: 12px;
                 border-bottom: 1px solid var(--border);

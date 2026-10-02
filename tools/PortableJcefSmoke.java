@@ -26,7 +26,7 @@ public class PortableJcefSmoke {
     int exit = 1;
     try {
       runtime = IsolatedCefRuntime.Companion.get();
-      LinuxDoBrowser browser = new LinuxDoBrowser(runtime);
+      LinuxDoBrowser browser = new LinuxDoBrowser(runtime, false);
       browser.getComponent().setSize(1000, 720);
       LinuxDoJSQuery query = LinuxDoJSQuery.Companion.create(browser, true);
       query.addHandler(result -> { PluginCefSmoke.replies.add(result); return null; });
@@ -43,6 +43,10 @@ public class PortableJcefSmoke {
       PluginCefSmoke.check(PluginCefSmoke.evaluate(browser, query,
           "({valid:location.origin==='https://linux.do'&&document.querySelector('#entry')!==null})")
           .get("valid").getAsBoolean(), "DOCUMENT_ORIGIN");
+      for (int[] size : new int[][]{{360,500},{1440,900},{540,640},{1000,720}}) {
+        SwingUtilities.invokeAndWait(() -> browser.getComponent().setSize(size[0],size[1]));
+        await(browser,query,"innerWidth==="+size[0]+"&&innerHeight==="+size[1],"DYNAMIC_VIEWPORT_"+size[0]+"_"+size[1]);
+      }
       SwingUtilities.invokeAndWait(() -> {
         browser.getCefBrowser().setFocus(true);
         for (int id : new int[]{MouseEvent.MOUSE_PRESSED, MouseEvent.MOUSE_RELEASED, MouseEvent.MOUSE_CLICKED}) {
@@ -69,7 +73,7 @@ public class PortableJcefSmoke {
       browser.getJbCefCookieManager().setCookie("https://linux.do/",
           new JBCefCookie("linuxdo_smoke", "synthetic", "linux.do", "/", true, false));
       await(browser, query, "document.cookie.includes('linuxdo_smoke=synthetic')", "COOKIE_WRITE");
-      LinuxDoBrowser second = new LinuxDoBrowser(runtime);
+      LinuxDoBrowser second = new LinuxDoBrowser(runtime, false);
       second.getComponent().setSize(800, 600);
       LinuxDoJSQuery secondQuery = PluginCefSmoke.query(second);
       second.loadHTML("<!doctype html><html><body>Shared session</body></html>");
@@ -125,7 +129,7 @@ public class PortableJcefSmoke {
       PaginationSmoke.run();
       runtime.dispose();
       runtime = IsolatedCefRuntime.Companion.get();
-      LinuxDoBrowser recreated = new LinuxDoBrowser(runtime);
+      LinuxDoBrowser recreated = new LinuxDoBrowser(runtime, false);
       recreated.getComponent().setSize(800, 600);
       LinuxDoJSQuery recreatedQuery = PluginCefSmoke.query(recreated);
       CountDownLatch recreatedReady = new CountDownLatch(1);

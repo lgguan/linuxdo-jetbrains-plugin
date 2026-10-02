@@ -52,6 +52,7 @@ public class IdeUiSmoke implements ApplicationStarter {
       report = new PrintWriter(Files.newBufferedWriter(output.resolve("result.txt")), true);
       project = ProjectManager.getInstance().getDefaultProject();
       if (Boolean.getBoolean("linuxdo.showcase")) showcase();
+      else if (Boolean.getBoolean("linuxdo.reader.only")) reader();
       else if (System.getProperty("linuxdo.draft.bridge") == null) run(); else runLive();
       report.println("IDE_UI_PASS=true");
       exit = 0;
@@ -59,6 +60,10 @@ public class IdeUiSmoke implements ApplicationStarter {
       error.printStackTrace();
       if (report != null) { report.println("ERROR=" + error); error.printStackTrace(report); }
     } finally {
+      try {
+        com.lgguan.linuxdo.plugin.net.IsolatedCefRuntime runtime=com.lgguan.linuxdo.plugin.net.IsolatedCefRuntime.Companion.currentOrNull();
+        if(runtime!=null) { runtime.dispose();((CompletableFuture<?>)field(runtime,"termination")).get(8,TimeUnit.SECONDS); }
+      } catch(Throwable cleanup) { if(report!=null)report.println("ERROR=Native cleanup: "+cleanup);exit=1; }
       if (report != null) report.close();
     }
     System.exit(exit);
@@ -553,6 +558,7 @@ public class IdeUiSmoke implements ApplicationStarter {
         else body="{\"results\":[{\"id\":1451,\"text\":\"软件开发\",\"name\":\"软件开发\",\"count\":123}]}";
       }
       else if(path.equals("/categories.json")) body="{\"category_list\":{\"categories\":[{\"id\":4,\"name\":\"开发调优\",\"slug\":\"dev\",\"permission\":1}]}}";
+      else if(path.equals("/session/current.json")) body="{\"current_user\":{\"id\":999997,\"username\":\"fixture_login\"}}";
       else if(path.equals("/latest.json") || path.equals("/top.json")) {
         if(failList) code=500;
         else {
@@ -597,10 +603,17 @@ public class IdeUiSmoke implements ApplicationStarter {
     Field clientField=LinuxDoHttpClient.class.getDeclaredField("client");clientField.setAccessible(true);
     okhttp3.OkHttpClient original=LinuxDoHttpClient.INSTANCE.getClient();
     ListFixture fixture=new ListFixture();
+    LinuxDoAuthService auth=LinuxDoAuthService.Companion.getInstance();
+    Field credentialsField=LinuxDoAuthService.class.getDeclaredField("credentials");credentialsField.setAccessible(true);
+    Field userField=LinuxDoAuthService.class.getDeclaredField("confirmedUser");userField.setAccessible(true);
+    Field versionField=LinuxDoAuthService.class.getDeclaredField("confirmedVersion");versionField.setAccessible(true);
+    Object previousCredentials=credentialsField.get(auth),previousUser=userField.get(auth),previousVersion=versionField.get(auth);
+    com.lgguan.linuxdo.plugin.net.PersistentCookieJar listCredentials=new com.lgguan.linuxdo.plugin.net.PersistentCookieJar(false);
     java.util.concurrent.atomic.AtomicReference<Topic> opened=new java.util.concurrent.atomic.AtomicReference<>();
     IssueListPanel[] holder=new IssueListPanel[1]; JFrame[] window=new JFrame[1];
     try {
       settings.setNetworkMode("JAVA_ONLY");
+      credentialsField.set(auth,listCredentials);userField.set(auth,null);
       clientField.set(null,original.newBuilder().addInterceptor(fixture).build());
       edt(() -> {
         holder[0]=new IssueListPanel(project,topic -> {opened.set(topic);return Unit.INSTANCE;},() -> Unit.INSTANCE);
@@ -613,6 +626,19 @@ public class IdeUiSmoke implements ApplicationStarter {
       JButton more=(JButton)field(panel,"loadMoreButton"),retry=(JButton)field(panel,"retryButton");
       await("IDE list first page",() -> model.size()==40 && !(Boolean)field(panel,"isLoading"));
       await("IDE category labels ready",() -> LinuxDoTopicService.Companion.getInstance().getCategoriesAreCurrent());
+      long beforeLogin=fixture.requests.stream().filter(r->r.equals("/latest.json::0")).count();
+      edt(()->{listCredentials.injectCookie("_t","isolated-list-login","linux.do");auth.credentialsPending();return null;});
+      Thread.sleep(300);
+      check("IDE_PENDING_LOGIN_INVALIDATES_WITHOUT_LIST_REFRESH",model.isEmpty()&&fixture.requests.stream().filter(r->r.equals("/latest.json::0")).count()==beforeLogin);
+      auth.refreshCurrentUser(true,loggedIn->{try {invoke(panel,"refreshAfterAuthentication",new Class<?>[0]);}catch(Exception e){throw new RuntimeException(e);}return Unit.INSTANCE;});
+      await("verified login refresh",()->auth.isLoggedIn()&&model.size()==40&&!(Boolean)field(panel,"isLoading"));Thread.sleep(300);
+      check("IDE_LOGIN_LIST_REFRESHES_ONCE",fixture.requests.stream().filter(r->r.equals("/latest.json::0")).count()==beforeLogin+1);
+      java.util.concurrent.atomic.AtomicBoolean verifiedAgain=new java.util.concurrent.atomic.AtomicBoolean();
+      auth.refreshCurrentUser(true,loggedIn->{verifiedAgain.set(true);return Unit.INSTANCE;});await("same account reverified",verifiedAgain::get);Thread.sleep(300);
+      check("IDE_SAME_ACCOUNT_VERIFICATION_DOES_NOT_REFRESH_LIST",fixture.requests.stream().filter(r->r.equals("/latest.json::0")).count()==beforeLogin+1);
+      edt(()->{listCredentials.clearAll();auth.credentialsPending();invoke(panel,"refreshAfterAuthentication",new Class<?>[0]);invoke(panel,"refreshAfterAuthentication",new Class<?>[0]);return null;});
+      await("guest verification refresh",()->model.size()==40&&!(Boolean)field(panel,"isLoading"));Thread.sleep(300);
+      check("IDE_GUEST_VERIFICATION_LIST_REFRESHES_ONCE",fixture.requests.stream().filter(r->r.equals("/latest.json::0")).count()==beforeLogin+2);
       check("IDE_LIST_PARSES_TAG_OBJECTS",model.get(0).getTags().get(0).getName().equals("软件开发"));
       check("IDE_LIST_DISPLAYS_TAGS_UNREAD_CATEGORY_AND_TIME",edt(() -> {
         Component rendered=list.getCellRenderer().getListCellRendererComponent(list,model.get(0),0,false,false);
@@ -647,8 +673,15 @@ public class IdeUiSmoke implements ApplicationStarter {
       check("IDE_SEARCH_FAILURE_RETAINS_PAGE",model.size()==2 && (Integer)field(panel,"currentPage")==1);
       edt(() -> {retry.doClick();return null;});await("IDE search retries page two",() -> model.size()==3 && !(Boolean)field(panel,"isLoading"));
       check("IDE_SEARCH_RETRY_SAME_PAGE_AND_DEDUP",Collections.frequency(fixture.requests,"/search.json:中文:2")==2 && model.get(0).getSearchPostNumber()==42 && !more.isEnabled());
-      Point click=edt(() -> {Rectangle row=list.getCellBounds(0,0);Point at=list.getLocationOnScreen();return new Point(at.x+40,at.y+row.y+row.height/2);});
-      Robot robot=new Robot();robot.mouseMove(click.x,click.y);robot.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);robot.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
+      // Dispatch through the production list listener without depending on desktop focus.
+      // A separate IDEA or editor window can receive a Robot click while this suite runs.
+      edt(() -> {
+        list.ensureIndexIsVisible(0);
+        Rectangle row=list.getCellBounds(0,0);
+        list.dispatchEvent(new java.awt.event.MouseEvent(list,java.awt.event.MouseEvent.MOUSE_CLICKED,
+          System.currentTimeMillis(),0,row.x+40,row.y+row.height/2,1,false,java.awt.event.MouseEvent.BUTTON1));
+        return null;
+      });
       await("IDE search result opens",() -> opened.get()!=null);
       check("IDE_SEARCH_CLICK_CARRIES_MATCHED_FLOOR",opened.get().getId()==11 && opened.get().getSearchPostNumber()==42);
       fixture.hold("旧查询");edt(() -> {panel.search("旧查询");return null;});if(!fixture.entered.await(15,TimeUnit.SECONDS)) throw new AssertionError("Old query did not start");
@@ -674,6 +707,7 @@ public class IdeUiSmoke implements ApplicationStarter {
       fixture.release.countDown();
       edt(() -> {if(holder[0]!=null && !(Boolean)field(holder[0],"disposed")) holder[0].dispose();if(window[0]!=null) window[0].dispose();return null;});
       clientField.set(null,original);settings.setNetworkMode(oldMode);
+      credentialsField.set(auth,previousCredentials);userField.set(auth,previousUser);versionField.set(auth,previousVersion);
     }
   }
   private static JsonObject topicData(String title, String body, int category, String... tags) {
@@ -813,8 +847,12 @@ public class IdeUiSmoke implements ApplicationStarter {
     check("CATEGORY_SEARCH_PARENT_AND_DESCRIPTION",edt(() -> results.size()==1 && results.get(0).toString().equals("测试版块")));
     screenshot(dialog,"topic-category-search");
     edt(() -> {search.setText("test");return null;});
-    Point categoryPoint=edt(() -> {JList<?> list=(JList<?>)field(categories,"resultList");Point point=list.getLocationOnScreen();Rectangle cell=list.getCellBounds(0,0);point.translate(20,cell.y+cell.height/2);return point;});
-    Robot categoryMouse=new Robot();categoryMouse.mouseMove(categoryPoint.x,categoryPoint.y);categoryMouse.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);categoryMouse.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
+    edt(() -> {
+      JList<?> list=(JList<?>)field(categories,"resultList");Rectangle cell=list.getCellBounds(0,0);
+      list.dispatchEvent(new java.awt.event.MouseEvent(list,java.awt.event.MouseEvent.MOUSE_RELEASED,
+        System.currentTimeMillis(),0,cell.x+20,cell.y+cell.height/2,1,false,java.awt.event.MouseEvent.BUTTON1));
+      return null;
+    });
     await("category mouse collapses popup",() -> !categories.isPopupVisible());
     check("CATEGORY_SEARCH_SLUG_SELECTS_ID",edt(() -> categories.getSelectedItem().toString().equals("测试版块") && !categories.isPopupVisible()));
     edt(() -> {categories.showPopup();search.setText("无匹配");return null;});
@@ -1005,16 +1043,52 @@ public class IdeUiSmoke implements ApplicationStarter {
   private static void reader() throws Exception {
     JsonObject topic = new JsonObject(); topic.addProperty("id", 999999); topic.addProperty("title", "IDE 文档阅读验收");
     topic.addProperty("highest_post_number", 12); topic.addProperty("posts_count", 12);
+    topic.add("valid_reactions",JsonParser.parseString("[\"heart\",\"tada\"]"));
+    JsonObject permissions=new JsonObject();permissions.addProperty("can_create_post",true);permissions.addProperty("notification_level",1);topic.add("details",permissions);
     JsonArray posts = new JsonArray(); JsonArray ids = new JsonArray();
     for (int floor = 1; floor <= 12; floor++) {
       JsonObject post = new JsonObject(); post.addProperty("id", floor); post.addProperty("topic_id", 999999);
       post.addProperty("post_number", floor); post.addProperty("username", "fixture_author");
+      post.addProperty("yours",floor==1);post.addProperty("can_edit",floor==1);post.addProperty("can_delete",floor==1);
+      post.addProperty("can_view_edit_history",true);post.addProperty("version",2);post.addProperty("bookmarked",false);
+      if(floor<=2)post.add("reactions",new JsonArray());
+      post.add("actions_summary",JsonParser.parseString("[{\"id\":2,\"count\":3,\"acted\":false,\"can_act\":"+(floor>1)+",\"can_undo\":false},{\"id\":99,\"count\":0,\"can_act\":true}]"));
       post.addProperty("cooked", "<p>中文正文第 " + floor + " 楼</p><pre><code>val sample = " + floor + "</code></pre><p>本地阅读验收</p>"+
-        (floor==1 ? "<aside class='quote' data-topic='2909396' data-post='5'><div class='title'>跨话题作者</div><blockquote>引用正文</blockquote></aside><aside class='quote' data-topic='999999' data-post='8'><div class='title'>本话题作者</div><blockquote>本话题引用</blockquote></aside><details><summary>展开详情</summary><p>内容</p></details><div class='spoiler'>隐藏内容</div><aside class='onebox'><header>来源</header><article><h3>卡片标题</h3><p>摘要</p></article></aside><table><tr><th>中文</th><th>值</th></tr><tr><td>数据</td><td>1</td></tr></table>" : ""));
+        (floor==1 ? "<span class='math'>E=mc^2</span><pre><code class='language-mermaid'>graph LR; A[Read] --> B[Reply]</code></pre><aside class='quote' data-topic='2909396' data-post='5'><div class='title'>跨话题作者</div><blockquote>引用正文</blockquote></aside><aside class='quote' data-topic='999999' data-post='8'><div class='title'>本话题作者</div><blockquote>本话题引用</blockquote></aside><details><summary>展开详情</summary><p>内容</p></details><div class='spoiler'>隐藏内容</div><aside class='onebox'><header>来源</header><article><h3>卡片标题</h3><p>摘要</p></article></aside><table><tr><th>中文</th><th>值</th></tr><tr><td>数据</td><td>1</td></tr></table>" : ""));
       posts.add(post); ids.add(floor);
     }
     JsonObject stream = new JsonObject(); stream.add("posts", posts); stream.add("stream", ids); topic.add("post_stream", stream);
     TopicDetailResponse detail = GSON.fromJson(topic, TopicDetailResponse.class);
+    // Reader capabilities include account state. Use memory-only credentials and local timing responses.
+    LinuxDoAuthService auth=LinuxDoAuthService.Companion.getInstance();
+    Field credentialsField=LinuxDoAuthService.class.getDeclaredField("credentials");credentialsField.setAccessible(true);
+    Field userField=LinuxDoAuthService.class.getDeclaredField("confirmedUser");userField.setAccessible(true);
+    Field versionField=LinuxDoAuthService.class.getDeclaredField("confirmedVersion");versionField.setAccessible(true);
+    Object previousCredentials=credentialsField.get(auth),previousUser=userField.get(auth),previousVersion=versionField.get(auth);
+    com.lgguan.linuxdo.plugin.net.PersistentCookieJar readerCredentials=new com.lgguan.linuxdo.plugin.net.PersistentCookieJar(false);
+    readerCredentials.injectCookie("_t","isolated-reader-synthetic","linux.do");
+    Field clientField=LinuxDoHttpClient.class.getDeclaredField("client");clientField.setAccessible(true);
+    okhttp3.OkHttpClient previousClient=LinuxDoHttpClient.INSTANCE.getClient();
+    LinuxDoSettingsState settings=LinuxDoSettingsState.Companion.getInstance();String previousMode=settings.getNetworkMode();
+    boolean previousAutoReport=settings.getAutoReportReadTimings();settings.setAutoReportReadTimings(true);
+    java.util.concurrent.atomic.AtomicInteger timingPosts=new java.util.concurrent.atomic.AtomicInteger();
+    java.util.concurrent.atomic.AtomicBoolean timingCsrfVerified=new java.util.concurrent.atomic.AtomicBoolean();
+    java.util.concurrent.atomic.AtomicReference<Map<String,String>> timingBody=new java.util.concurrent.atomic.AtomicReference<>();
+    settings.setNetworkMode("JAVA_ONLY");
+    clientField.set(null,previousClient.newBuilder().cookieJar(readerCredentials).addInterceptor(chain->{
+      okhttp3.Request request=chain.request();String path=request.url().encodedPath();String response;
+      if(request.method().equals("GET")&&(path.equals("/session/csrf")||path.equals("/session/csrf.json")))response="{\"csrf\":\"reader-fixture-csrf\"}";
+      else if(request.method().equals("POST")&&path.equals("/topics/timings")){
+        okio.Buffer form=new okio.Buffer();request.body().writeTo(form);Map<String,String> values=new HashMap<>();
+        for(String entry:form.readUtf8().split("&")){String[] pair=entry.split("=",2);values.put(java.net.URLDecoder.decode(pair[0],java.nio.charset.StandardCharsets.UTF_8),java.net.URLDecoder.decode(pair[1],java.nio.charset.StandardCharsets.UTF_8));}
+        timingBody.set(values);timingPosts.incrementAndGet();response="";
+        timingCsrfVerified.set("reader-fixture-csrf".equals(request.header("X-CSRF-Token")));
+      }
+      else throw new IOException("Isolated reader rejects all HTTP transport");
+      return new okhttp3.Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1).code(200).message("isolated reader fixture").body(okhttp3.ResponseBody.create(response,okhttp3.MediaType.parse("application/json"))).build();
+    }).build());
+    credentialsField.set(auth,readerCredentials);
+    auth.setCurrentUserDirectly(GSON.fromJson("{\"id\":999998,\"username\":\"fixture_reader\"}",UserInfo.class));
     DocViewerPanel panel = edt(() -> new DocViewerPanel(project));
     JFrame frame = edt(() -> { JFrame f = new JFrame("Linux Do reader acceptance"); f.setContentPane(panel); f.setSize(960, 700); f.setLocation(120, 100); f.setVisible(true); return f; });
     LinuxDoJSQuery query = null;
@@ -1033,20 +1107,144 @@ public class IdeUiSmoke implements ApplicationStarter {
         invoke(panel, "renderTopic", new Class<?>[]{TopicDetailResponse.class, Integer.class}, detail, 3); return null; });
       Thread.sleep(1200);
       check("IDE_PRODUCTION_READER_RENDERS", evaluate(browser, query, replies, "({ok:document.querySelectorAll('.post-entry').length===12 && !!window.linuxDoPagination})").get("ok").getAsBoolean());
+      check("IDE_READER_ONLY_AVAILABLE_ACTIONS",evaluate(browser,query,replies,"({ok:!document.querySelector('.action-disabled,[data-reader-action=recover],[data-reader-action=accept],[data-reader-action=reactionUsers]') && !document.querySelector('#floor-2 [data-reader-action=edit]') && !document.querySelector('.floor-comment-header .floor-actions') && !!document.querySelector('#floor-2 [data-reader-action=reaction]') && !document.querySelector('#floor-1 [data-reader-action=reaction]')})").get("ok").getAsBoolean());
+      check("IDE_READER_ACTIONS_COMPACT_AND_UNIFORM",evaluate(browser,query,replies,"({ok:[...document.querySelectorAll('.floor-actions')].every(el=>el.querySelectorAll(':scope > button').length<=3 && el.querySelectorAll('.post-actions-menu').length<=1) && new Set([...document.querySelectorAll('.floor-actions > button')].map(el=>el.getBoundingClientRect().height)).size===1 && !document.querySelector('.post-actions-menu[open]')})").get("ok").getAsBoolean());
+      check("IDE_ICON_ACTIONS_AND_DOCUMENT_READING_TOOLS",evaluate(browser,query,replies,"(()=>{const el=document.querySelector('.topic-reader-tools'),tools=el.getBoundingClientRect(),header=el.closest('.doc-header').getBoundingClientRect();return {ok:!!document.querySelector('#floor-2 .floor-actions > [data-post-command=boost]') && !document.querySelector('.floor-actions > [data-post-command=share]') && !!document.querySelector('.post-actions-menu-items [data-post-command=share]') && getComputedStyle(el).position==='absolute' && Math.abs(tools.top-header.top)<2 && Math.abs(tools.right-header.right)<2 && !document.querySelector('.topic-navigation .topic-reader-tools')}})()").get("ok").getAsBoolean());
+      check("IDE_CONCISE_METADATA_AND_SINGLE_BOOKMARK_ICON",evaluate(browser,query,replies,"({ok:![...document.querySelectorAll('.floor-number')].some(el=>/Original Specification|Revision|---/.test(el.textContent)) && [...document.querySelectorAll('[data-reader-action=bookmark]')].every(el=>el.querySelectorAll('svg').length===1 && !/[★☆]/.test(el.textContent))})").get("ok").getAsBoolean());
       check("IDE_READER_SEMANTIC_CONTENT",evaluate(browser,query,replies,"({ok:document.querySelectorAll('aside.quote').length===2 && document.querySelectorAll('.onebox article').length===1 && document.querySelectorAll('.forum-table table').length===1})").get("ok").getAsBoolean());
-      check("IDE_CROSS_TOPIC_QUOTE_ROUTES_TARGET_FLOOR",evaluate(browser,query,replies,"(()=>{var original=window.intellijBridge.handleLinkClick;var target='';window.intellijBridge.handleLinkClick=function(url){target=url};document.querySelector('aside[data-topic=\"2909396\"] .quote-controls').click();window.intellijBridge.handleLinkClick=original;return {ok:target==='https://linux.do/t/2909396/5'}})()").get("ok").getAsBoolean());
-      evaluate(browser, query, replies, "(()=>{document.querySelector('aside[data-topic=\"999999\"] .quote-controls').click();return {ok:true}})()");
+      Thread.sleep(1500);
+      check("IDE_OFFLINE_MATH_AND_MERMAID_RENDER",evaluate(browser,query,replies,"({ok:document.querySelectorAll('.forum-source-output svg').length===2 && !document.querySelector('.forum-render-error')})").get("ok").getAsBoolean());
+      evaluate(browser,query,replies,"(()=>{const node=document.querySelector('#floor-1 .post-content p').firstChild,r=document.createRange();r.setStart(node,0);r.setEnd(node,4);getSelection().removeAllRanges();getSelection().addRange(r);document.querySelector('#floor-1 details').open=true;window.readerThemeState={key:linuxDoPage.key,node:document.querySelector('#floor-1'),selection:getSelection().toString(),top:document.querySelector('#floor-1').getBoundingClientRect().top};return {ok:true}})()");
+      com.intellij.openapi.editor.colors.EditorColorsManager colors=com.intellij.openapi.editor.colors.EditorColorsManager.getInstance();
+      com.intellij.openapi.editor.colors.EditorColorsScheme originalScheme=colors.getGlobalScheme();
+      com.intellij.openapi.editor.colors.EditorColorsScheme lightScheme=Arrays.stream(colors.getAllSchemes()).filter(s->!com.intellij.ui.ColorUtil.isDark(s.getDefaultBackground())).findFirst().orElseThrow();
+      final LinuxDoJSQuery themeQuery=query;
+      String lightBackground="#"+com.intellij.ui.ColorUtil.toHex(lightScheme.getDefaultBackground()),originalBackground="#"+com.intellij.ui.ColorUtil.toHex(originalScheme.getDefaultBackground());
+      try {
+        edt(()->{colors.setGlobalScheme(lightScheme);return null;});
+        await("reader follows light editor theme",()->evaluate(browser,themeQuery,replies,"({ok:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()==='"+lightBackground.toLowerCase()+"'&&getComputedStyle(document.body).color==='rgb(31, 35, 40)'})").get("ok").getAsBoolean());
+        check("IDE_THEME_CHANGE_UPDATES_CURRENT_DOCUMENT",evaluate(browser,query,replies,"({ok:linuxDoPage.key===readerThemeState.key && document.querySelector('#floor-1')===readerThemeState.node && getSelection().toString()===readerThemeState.selection && document.querySelector('#floor-1 details').open && Math.abs(document.querySelector('#floor-1').getBoundingClientRect().top-readerThemeState.top)<3})").get("ok").getAsBoolean());
+        edt(()->{colors.setGlobalScheme(originalScheme);return null;});
+        await("reader restores editor theme",()->evaluate(browser,themeQuery,replies,"({ok:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()==='"+originalBackground.toLowerCase()+"'})").get("ok").getAsBoolean());
+        check("IDE_THEME_RESTORE_PRESERVES_DOCUMENT",evaluate(browser,query,replies,"({ok:linuxDoPage.key===readerThemeState.key && document.querySelector('#floor-1')===readerThemeState.node})").get("ok").getAsBoolean());
+        evaluate(browser,query,replies,"(()=>{document.getElementById('linuxdo-reader-theme').textContent=':root { --bg: #123456; }';return {ok:true}})()");
+        edt(()->{com.intellij.openapi.application.ApplicationManager.getApplication().getMessageBus().syncPublisher(com.intellij.ide.ui.LafManagerListener.TOPIC).lookAndFeelChanged(com.intellij.ide.ui.LafManager.getInstance());return null;});
+        await("look and feel event updates reader",()->evaluate(browser,themeQuery,replies,"({ok:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()==='"+originalBackground.toLowerCase()+"'})").get("ok").getAsBoolean());
+        check("IDE_LOOK_AND_FEEL_EVENT_UPDATES_READER",evaluate(browser,query,replies,"({ok:linuxDoPage.key===readerThemeState.key && document.querySelector('#floor-1')===readerThemeState.node})").get("ok").getAsBoolean());
+      } finally {edt(()->{colors.setGlobalScheme(originalScheme);return null;});}
+      int originalWidth=settings.getReadingWidth();
+      try {
+        edt(()->{settings.setReadingWidth(600);settings.fireSettingsChanged();return null;});
+        await("reading width updates current layout",()->evaluate(browser,themeQuery,replies,"({ok:linuxDoPage.width===600 && Math.abs(document.querySelector('.doc-container').getBoundingClientRect().width-600)<2 && Math.abs(document.querySelector('.doc-header').getBoundingClientRect().width-600)<2 && Math.abs(document.querySelector('#floor-1').getBoundingClientRect().width-600)<2})").get("ok").getAsBoolean());
+        check("IDE_READING_WIDTH_UPDATES_WITHOUT_REOPENING",evaluate(browser,query,replies,"({ok:linuxDoPage.key===readerThemeState.key && document.querySelector('#floor-1')===readerThemeState.node && getSelection().toString()===readerThemeState.selection})").get("ok").getAsBoolean());
+      } finally {edt(()->{settings.setReadingWidth(originalWidth);settings.fireSettingsChanged();return null;});}
+      await("reading width restored",()->evaluate(browser,themeQuery,replies,"({ok:linuxDoPage.width==="+originalWidth+"})").get("ok").getAsBoolean());
+      evaluate(browser,query,replies,"(()=>{getSelection().removeAllRanges();document.querySelector('#floor-1 details').open=false;return {ok:true}})()");
+      check("IDE_CROSS_TOPIC_QUOTE_SHOWS_CONTEXT",evaluate(browser,query,replies,"(()=>{var original=window.intellijBridge.readerAction;var target=0;window.intellijBridge.readerAction=function(key,id,action,postId,input){target=input.topic;linuxDoReaderResult(key,id,{items:[{floor:5,author:'sample',text:'公开引用上下文'}]})};document.querySelector('aside[data-topic=\"2909396\"] .quote-controls').click();window.intellijBridge.readerAction=original;return {ok:target===2909396 && !!document.querySelector('.topic-reader-panel')}})()").get("ok").getAsBoolean());
+      evaluate(browser, query, replies, "(()=>{document.querySelector('.topic-reader-panel button').click();linuxDoPagination.jump(8);return {ok:true}})()");
       await("IDE receives successful jump origin", () -> ((Map<?,?>)field(panel, "returnFloors")).containsKey(999999L));
       check("IDE_NAVIGATION_RETURN_BRIDGE", edt(() -> ((Map<?,?>)field(panel, "returnFloors")).get(999999L) != null));
       check("IDE_RETURN_BUTTON_ENABLED", evaluate(browser, query, replies, "({ok:!document.querySelector('.topic-return-button').disabled})").get("ok").getAsBoolean());
       evaluate(browser, query, replies, "(()=>{document.querySelector('.topic-return-button').click();return {ok:true}})()");
+      evaluate(browser, query, replies, "(()=>{linuxDoPagination.jump(1);return {ok:true}})()");
+      Thread.sleep(2000);
+      showcaseCapture(frame,"reader-media-and-actions");
       edt(() -> { frame.setSize(360, 700); return null; }); Thread.sleep(300);
       check("IDE_NARROW_NAVIGATION_NO_OVERFLOW", evaluate(browser, query, replies, "({ok:document.documentElement.scrollWidth<=window.innerWidth+1})").get("ok").getAsBoolean());
-      ImageIO.write(new Robot().createScreenCapture(edt(frame::getBounds)), "png", output.resolve("reader-narrow-navigation.png").toFile());
+      evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-1 .post-actions-menu summary').click();return {ok:true}})()");Thread.sleep(100);
+      check("IDE_NARROW_POST_MENU_STAYS_IN_VIEW",evaluate(browser,query,replies,"(()=>{const r=document.querySelector('#floor-1 .post-actions-menu-items').getBoundingClientRect();return {ok:r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight}})()").get("ok").getAsBoolean());
+      evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-1 .post-actions-menu').open=false;return {ok:true}})()");
+      showcaseCapture(frame,"reader-narrow-navigation");
+      // Capture ordinary short posts, matching the layout that prompted this regression.
+      JsonObject compact=GSON.toJsonTree(detail).getAsJsonObject();compact.addProperty("title","开发笔记与交流");compact.addProperty("highest_post_number",2);compact.addProperty("last_read_post_number",0);
+      JsonArray shortPosts=new JsonArray();
+      for(int index=0;index<2;index++){
+        JsonObject p=posts.get(index).getAsJsonObject().deepCopy();p.addProperty("cooked",index==0?"<p>整理了一份开发笔记，欢迎交流。</p>":"<p>感谢分享，期待后续更新。</p>");
+        p.addProperty("can_edit",false);p.addProperty("can_delete",false);p.addProperty("can_view_edit_history",false);
+        if(index==0)p.add("actions_summary",JsonParser.parseString("[{\"id\":2,\"count\":0,\"can_act\":false}]"));
+        shortPosts.add(p);
+      }
+      JsonObject shortStream=new JsonObject();shortStream.add("posts",shortPosts);shortStream.add("stream",JsonParser.parseString("[1,2]"));compact.add("post_stream",shortStream);
+      TopicDetailResponse ordinary=GSON.fromJson(compact,TopicDetailResponse.class);
+      edt(() -> {frame.setSize(960,700);Field f=DocViewerPanel.class.getDeclaredField("currentTopic");f.setAccessible(true);f.set(panel,ordinary);invoke(panel,"renderTopic",new Class<?>[]{TopicDetailResponse.class,Integer.class},ordinary,1);return null;});
+      Thread.sleep(1200);
+      check("IDE_ORDINARY_POSTS_HAVE_ONLY_AVAILABLE_ACTIONS",evaluate(browser,query,replies,"({ok:document.querySelectorAll('.post-entry').length===2 && !document.querySelector('[data-reader-action=edit],[data-reader-action=history],[data-reader-action=delete],.action-disabled') && document.querySelector('.topic-return-button').hidden && document.querySelector('#floor-1 .floor-actions').getBoundingClientRect().top>=document.querySelector('#floor-1 .post-content').getBoundingClientRect().bottom})").get("ok").getAsBoolean());
+      check("IDE_READER_FOCUS_TARGET_IS_BROWSER",edt(()->panel.preferredFocusedComponent()==browser.getComponent()));
+      edt(()->{frame.toFront();frame.requestFocus();panel.setSelected(true);panel.preferredFocusedComponent().requestFocusInWindow();return null;});
+      Point readerWindow=edt(frame::getLocationOnScreen);Robot readerFocus=new Robot();readerFocus.mouseMove(readerWindow.x+200,readerWindow.y+15);readerFocus.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);readerFocus.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
+      edt(()->{panel.preferredFocusedComponent().requestFocusInWindow();return null;});
+      final LinuxDoJSQuery readingQuery=query;
+      await("automatic foreground read samples",()->evaluate(browser,readingQuery,replies,"({ok:[...document.querySelectorAll('.unread-dot')].every(el=>getComputedStyle(el).display==='none')})").get("ok").getAsBoolean());
+      check("IDE_AUTO_READ_UPDATES_VISIBLE_DOTS",LinuxDoReadTrackingService.Companion.getInstance().isPostRead(999999L,1,false,0)&&LinuxDoReadTrackingService.Companion.getInstance().isPostRead(999999L,2,false,0));
+      check("IDE_AUTO_READ_CLEARS_UNREAD_TOOL",evaluate(browser,query,replies,"({ok:linuxDoPage.unreadFloor===null&&[...document.querySelectorAll('.topic-reader-menu button')].find(el=>el.textContent==='未读').hidden})").get("ok").getAsBoolean());
+      edt(()->{invoke(panel,"flushReading",new Class<?>[0]);return null;});await("automatic timings reach mock server",()->timingPosts.get()>0);
+      Map<String,String> reportedValues=timingBody.get();
+      check("IDE_AUTO_READ_SYNCS_REAL_TIMING_PAYLOAD",timingCsrfVerified.get() && reportedValues.get("topic_id").equals("999999") && Long.parseLong(reportedValues.get("timings[1]"))>0 && Long.parseLong(reportedValues.get("timings[2]"))>0 && Long.parseLong(reportedValues.get("topic_time"))==Long.parseLong(reportedValues.get("timings[1]"))+Long.parseLong(reportedValues.get("timings[2]")));
+      edt(()->{panel.setSelected(false);return null;});Thread.sleep(1200);
+      check("IDE_BACKGROUND_TAB_ACCUMULATES_NO_READING",((Map<?,?>)invoke(field(panel,"readingClock"),"drain",new Class<?>[0])).isEmpty());
+      evaluate(browser,query,replies,"(()=>{linuxDoPagination.jump(2);return {ok:true}})()");
+      check("IDE_LOCATION_STATUS_AND_SHORTCUTS_SHARE_ROW",evaluate(browser,query,replies,"(()=>{const a=document.querySelector('.topic-navigation-status').getBoundingClientRect(),b=document.querySelector('.floor-jump-controls').getBoundingClientRect();return {ok:Math.abs((a.top+a.bottom)/2-(b.top+b.bottom)/2)<2}})()").get("ok").getAsBoolean());
+      evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 .post-actions-menu').open=true;return {ok:true}})()");
+      final LinuxDoJSQuery resizeQuery=query;
+      for(int[] size:new int[][]{{1080,780},{480,600},{860,740},{360,700},{960,700}}){
+        edt(()->{frame.setSize(size[0],size[1]);return null;});
+        await("actual IDE browser viewport follows "+size[0],()->evaluate(browser,resizeQuery,replies,"({width:innerWidth,height:innerHeight})").get("width").getAsInt()==browser.getComponent().getWidth() && evaluate(browser,resizeQuery,replies,"({height:innerHeight})").get("height").getAsInt()==browser.getComponent().getHeight());
+        Thread.sleep(150);
+        check("IDE_DYNAMIC_RESIZE_"+size[0]+"_"+size[1],evaluate(browser,query,replies,"(()=>{const el=document.querySelector('.topic-reader-tools'),r=el.getBoundingClientRect(),h=el.closest('.doc-header').getBoundingClientRect(),m=document.querySelector('#floor-2 .post-actions-menu-items').getBoundingClientRect();return {ok:Math.abs(r.right-h.right)<2 && document.documentElement.scrollWidth<=innerWidth && m.left>=0&&m.right<=innerWidth&&m.top>=0&&m.bottom<=innerHeight}})()").get("ok").getAsBoolean());
+      }
+      evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 .post-actions-menu').open=false;return {ok:true}})()");
+      Thread.sleep(2500);
+      showcaseCapture(frame,"reader-compact-actions");
+      edt(() -> {frame.setSize(360,700);return null;});Thread.sleep(350);
+      check("IDE_ORDINARY_NARROW_LAYOUT_NO_OVERFLOW",evaluate(browser,query,replies,"({ok:document.documentElement.scrollWidth<=innerWidth+1 && !document.querySelector('.topic-reader-tools[open]')})").get("ok").getAsBoolean());
+      showcaseCapture(frame,"reader-compact-narrow");
+      // Verify actual native frames without a wheel/JS query to provoke repainting.
+      for(int i=0;i<240;i++) {
+        int width=360+(i*73)%900,height=420+(i*31)%360;
+        edt(()->{frame.setSize(width,height);return null;}); Thread.sleep(5);
+      }
+      edt(()->{frame.setSize(960,700);return null;});
+      Thread.sleep(200);
+      report.println("RESIZE_DIAGNOSTIC_COMPONENT="+browser.getComponent().getSize()+" SCALE="+browser.getComponent().getGraphicsConfiguration().getDefaultTransform().getScaleX()
+          +" IMAGE="+((BufferedImage)field(browser,"image")).getWidth()+"x"+((BufferedImage)field(browser,"image")).getHeight());
+      await("native bitmap follows final IDE resize without scrolling",()-> {
+        synchronized(field(browser,"imageLock")) {
+          BufferedImage bitmap=(BufferedImage)field(browser,"image");
+          double scale=browser.getComponent().getGraphicsConfiguration().getDefaultTransform().getScaleX();
+          return bitmap!=null && bitmap.getWidth()==Math.ceil(browser.getComponent().getWidth()*scale)
+              && bitmap.getHeight()==Math.ceil(browser.getComponent().getHeight()*scale);
+        }
+      });
+      check("IDE_RAPID_RESIZE_PAINTS_WITHOUT_SCROLL",true);
+      // Inject the same callback-channel loss seen in the user's log, only in this isolated IDE.
+      Object runtime=browser.getRuntime(),app=field(runtime,"app");
+      Object server=browser.getRuntime().call(app,"getServer",new Object[0]);
+      invoke(server,"onCefHandlersThreadFinished",new Class<?>[0]);
+      await("reader offers recovery after callback disconnect",()->retryBrowserButton(panel)!=null);
+      check("IDE_DISCONNECT_SHOWS_RETRY_INSTEAD_OF_WAITING",true);
+      edt(()->{retryBrowserButton(panel).doClick();return null;});
+      await("fresh reader created after retry",()->field(panel,"jbCefBrowser")!=null && field(panel,"jbCefBrowser")!=browser);
+      LinuxDoBrowser recovered=(LinuxDoBrowser)edt(()->field(panel,"jbCefBrowser"));
+      LinuxDoJSQuery recoveredQuery=(LinuxDoJSQuery)edt(()->field(panel,"jsQuery"));
+      BlockingQueue<String> recoveryReplies=new LinkedBlockingQueue<>();
+      @SuppressWarnings("unchecked") Function1<String,LinuxDoJSQuery.Response> recoveredHandler=(Function1<String,LinuxDoJSQuery.Response>)field(recoveredQuery,"handler");
+      recoveredQuery.addHandler(value->{if(value.startsWith("probe:")){recoveryReplies.add(value.substring(6));return null;}return recoveredHandler.invoke(value);});
+      await("recovered reader restores cached topic",()->evaluate(recovered,recoveredQuery,recoveryReplies,"({ok:document.querySelectorAll('.post-entry').length===2 && !!window.linuxDoPagination})").get("ok").getAsBoolean());
+      check("IDE_RETRY_RESTORES_TOPIC_IN_FRESH_RUNTIME",recovered.getRuntime()!=runtime && panel.getCurrentPostNumber()!=null);
     } finally {
       if (query != null) query.dispose();
       edt(() -> { panel.dispose(); frame.dispose(); return null; });
+      credentialsField.set(auth,previousCredentials);userField.set(auth,previousUser);versionField.set(auth,previousVersion);
+      clientField.set(null,previousClient);settings.setNetworkMode(previousMode);settings.setAutoReportReadTimings(previousAutoReport);
     }
+    report.println("READER_NETWORK_REQUESTS_BLOCKED=true");
     report.println("TOTAL_CHECKS=" + checks.size());
+  }
+  private static JButton retryBrowserButton(Container root) {
+    for(Component child:root.getComponents()) {
+      if(child instanceof JButton && ((JButton)child).getText().equals("重试正文浏览器"))return (JButton)child;
+      if(child instanceof Container) { JButton result=retryBrowserButton((Container)child);if(result!=null)return result; }
+    }
+    return null;
   }
 }

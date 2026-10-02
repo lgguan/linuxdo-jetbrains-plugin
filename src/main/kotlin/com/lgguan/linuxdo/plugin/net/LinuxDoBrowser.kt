@@ -23,10 +23,22 @@ import javax.swing.SwingUtilities
 class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(), private val readOnly: Boolean = false) : Disposable {
     @Volatile var isDisposed = false
         private set
+    private val disposalStarted = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile private var created = false
     @Volatile private var nativeReady = false
     private val nativeReadyFuture = java.util.concurrent.CompletableFuture<Void>()
+    private val runtimeFailure = java.util.concurrent.CompletableFuture<String>()
+    private var startupWatchdog: java.util.concurrent.ScheduledFuture<*>? = null
     @Volatile private var pendingUrl: String? = null
+    // Painting never waits for a browser RPC or holds the native mutex while Swing draws.
+    private val paintLock = Any()
+    private val imageLock = Any()
+    private var pixels = IntArray(0)
+    @Volatile private var paintFailed = false
+    @Volatile private var viewSize = Dimension(1, 1)
+    @Volatile private var paintedFrames = 0L
+    private var resizeFrame = 0L
+    private var repaintAttempts = 0
     private var image: BufferedImage? = null
     private var popup: BufferedImage? = null
     private var popupBounds = Rectangle()
@@ -39,7 +51,7 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
     val component = object : JPanel() {
         override fun paintComponent(g: Graphics) {
             super.paintComponent(g)
-            synchronized(this@LinuxDoBrowser) {
+            synchronized(imageLock) {
                 image?.let { g.drawImage(it, 0, 0, width, height, null) }
                 popup?.let { g.drawImage(it, popupBounds.x, popupBounds.y, popupBounds.width, popupBounds.height, null) }
             }
@@ -55,11 +67,24 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
     val cefBrowser: CefBrowser
     val jbCefClient = ClientHandlers()
     val jbCefCookieManager = Cookies(runtime)
+    private val resizeTimer = javax.swing.Timer(40) { resizeNativeView() }.apply { isRepeats = false }
+    private val repaintTimer = javax.swing.Timer(100) {
+        val size = viewSize
+        val scale = deviceScale()
+        val painted = synchronized(imageLock) {
+            image?.let { it.width == kotlin.math.ceil(size.width * scale).toInt() &&
+                it.height == kotlin.math.ceil(size.height * scale).toInt() && paintedFrames > resizeFrame } == true
+        }
+        if (!isDisposed && runtime.isUsable && !painted && repaintAttempts++ < 20) {
+            cefBrowser.wasResized(size.width, size.height)
+            runtime.call(rawBrowser, "invalidate")
+        } else (it.source as javax.swing.Timer).stop()
+    }
 
     init {
         val render = runtime.handler("org.cef.handler.CefNativeRenderHandler") { method, args ->
             when (method) {
-                "getViewRect" -> Rectangle(0, 0, component.width.coerceAtLeast(1), component.height.coerceAtLeast(1))
+                "getViewRect" -> viewSize.let { Rectangle(0, 0, it.width, it.height) }
                 "getScreenPoint" -> (args[1] as Point).let { point ->
                     val origin = runCatching { component.locationOnScreen }.getOrDefault(Point())
                     BrowserGeometry.screenPoint(HostPlatform.detect(), origin, point, screenBounds(), deviceScale())
@@ -71,8 +96,8 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
                     true
                 }
                 "onPaintWithSharedMem" -> { paintShared(args); null }
-                "onPopupShow" -> { if (args[1] == false) synchronized(this) { popup = null }; component.repaint(); null }
-                "onPopupSize" -> { synchronized(this) { popupBounds = Rectangle(args[1] as Rectangle) }; null }
+                "onPopupShow" -> { if (args[1] == false) synchronized(imageLock) { popup = null }; component.repaint(); null }
+                "onPopupSize" -> { synchronized(imageLock) { popupBounds = Rectangle(args[1] as Rectangle) }; null }
                 "onCursorChange" -> {
                     val cursor = args[1] as Int
                     SwingUtilities.invokeLater { if (!isDisposed && cursor in 0..13) component.cursor = Cursor.getPredefinedCursor(cursor) }
@@ -91,6 +116,7 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
                     synchronized(this@LinuxDoBrowser) {
                         if (!isDisposed) {
                             nativeReady = true
+                            startupWatchdog?.cancel(false)
                             pendingUrl?.let { pendingUrl = null; browser?.loadURL(it) }
                             nativeReadyFuture.complete(null)
                         }
@@ -106,7 +132,12 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
         }, cefBrowser)
         val requestHandler = runtime.handler("org.cef.handler.CefRequestHandler") { method, args ->
             when (method) {
-                "onBeforeBrowse" -> navigationHandler?.invoke(runtime.call(args[2]!!, "getURL") as String) ?: false
+                "onBeforeBrowse" -> {
+                    val url = runtime.call(args[2]!!, "getURL") as String
+                    val main = runtime.call(args[1]!!, "isMain") as Boolean
+                    if (documentBytes != null && !main) !com.lgguan.linuxdo.plugin.theme.RenderAssets.allowedPlayer(url)
+                    else navigationHandler?.invoke(url) ?: false
+                }
                 "onOpenURLFromTab" -> {
                     val url = args[2] as String
                     SwingUtilities.invokeLater { if (navigationHandler?.invoke(url) != true) loadURL(url) }
@@ -114,6 +145,12 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
                 }
                 "getResourceRequestHandler" -> {
                     val url = runtime.call(args[2]!!, "getURL") as String
+                    if (documentBytes != null) com.lgguan.linuxdo.plugin.theme.RenderAssets.resource(url)?.let { bytes ->
+                        return@handler runtime.handler("org.cef.handler.CefResourceRequestHandler") { name, _ ->
+                            if (name == "getResourceHandler") documentResource(bytes, "application/javascript") else null
+                        }
+                    }
+                    SwingUtilities.invokeLater { scheduleResize() }
                     if (readOnly) return@handler runtime.handler("org.cef.handler.CefResourceRequestHandler") { name, resourceArgs ->
                         if (name == "onBeforeResourceLoad") runtime.call(resourceArgs[2]!!, "getMethod") !in setOf("GET", "HEAD", "OPTIONS") else null
                     }
@@ -128,7 +165,7 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
         }
         runtime.call(rawClient, "addRequestHandler", requestHandler)
         component.addComponentListener(object : ComponentAdapter() {
-            override fun componentResized(e: ComponentEvent?) { if (created && !isDisposed) cefBrowser.wasResized(component.width, component.height) }
+            override fun componentResized(e: ComponentEvent?) = scheduleResize()
             override fun componentMoved(e: ComponentEvent?) = updateScreenInfo()
         })
         component.addPropertyChangeListener("graphicsConfiguration") { updateScreenInfo() }
@@ -180,6 +217,15 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
         runtime.register(this)
     }
 
+    internal fun runtimeFailed(reason: String) {
+        nativeReadyFuture.completeExceptionally(java.io.IOException(reason))
+        runtimeFailure.complete(reason)
+    }
+
+    fun onRuntimeFailure(handler: (String) -> Unit) {
+        runtimeFailure.thenAccept { reason -> SwingUtilities.invokeLater { handler(reason) } }
+    }
+
     private var refreshHandler: (() -> Unit)? = null
 
     /** Generated documents refresh their data; native reload would lose the document body. */
@@ -190,26 +236,44 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
         val width = args[5] as Int
         val height = args[6] as Int
         if (width <= 0 || height <= 0 || width.toLong() * height > 16_000_000) return
-        val sharedClass = Class.forName("com.jetbrains.cef.SharedMemory", true, javaClass.classLoader)
-        runtime.ensureSharedMemoryLoaded()
-        val rasterClass = Class.forName("com.jetbrains.cef.SharedMemory\$WithRaster", true, javaClass.classLoader)
-        val cache = sharedCache ?: Class.forName("com.jetbrains.cef.SharedMemoryCache", true, javaClass.classLoader)
-            .getConstructor().newInstance().also { sharedCache = it }
-        val raster = cache.javaClass.getMethod("get", String::class.java, Long::class.javaPrimitiveType).invoke(cache, args[3], args[4])
-        rasterClass.getMethod("setWidth", Int::class.javaPrimitiveType).invoke(raster, width)
-        rasterClass.getMethod("setHeight", Int::class.javaPrimitiveType).invoke(raster, height)
-        rasterClass.getMethod("setDirtyRectsCount", Int::class.javaPrimitiveType).invoke(raster, args[2])
-        sharedClass.getMethod("lock").invoke(raster)
         try {
-            synchronized(this) {
-                val previous = if (args[1] == true) popup else image
-                val bitmap = previous?.takeIf { it.width == width && it.height == height }
-                    ?: BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+            synchronized(paintLock) {
+                if (isDisposed) return
+                val sharedClass = Class.forName("com.jetbrains.cef.SharedMemory", true, javaClass.classLoader)
+                val rasterClass = Class.forName("com.jetbrains.cef.SharedMemory\$WithRaster", true, javaClass.classLoader)
+                val cache = sharedCache ?: Class.forName("com.jetbrains.cef.SharedMemoryCache", true, javaClass.classLoader)
+                    .getConstructor().newInstance().also { sharedCache = it }
+                val raster = cache.javaClass.getMethod("get", String::class.java, Long::class.javaPrimitiveType).invoke(cache, args[3], args[4])
+                // Serialize metadata too: main and popup callbacks may share the cached native raster.
+                rasterClass.getMethod("setWidth", Int::class.javaPrimitiveType).invoke(raster, width)
+                rasterClass.getMethod("setHeight", Int::class.javaPrimitiveType).invoke(raster, height)
+                rasterClass.getMethod("setDirtyRectsCount", Int::class.javaPrimitiveType).invoke(raster, args[2])
+                val count = width * height
+                if (pixels.size != count) pixels = IntArray(count)
+                sharedClass.getMethod("lock").invoke(raster)
+                try {
                 val bytes = rasterClass.getMethod("wrapRaster").invoke(raster) as java.nio.ByteBuffer
-                bytes.order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get((bitmap.raster.dataBuffer as DataBufferInt).data)
-                if (args[1] == true) popup = bitmap else image = bitmap
+                bytes.order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels)
+                } finally { sharedClass.getMethod("unlock").invoke(raster) }
+                synchronized(imageLock) {
+                    if (isDisposed) return
+                    val previous = if (args[1] == true) popup else image
+                    val bitmap = previous?.takeIf { it.width == width && it.height == height }
+                        ?: BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+                    pixels.copyInto((bitmap.raster.dataBuffer as DataBufferInt).data)
+                    if (args[1] == true) popup = bitmap else image = bitmap
+                    if (args[1] != true) paintedFrames++
+                }
             }
-        } finally { sharedClass.getMethod("unlock").invoke(raster) }
+        } catch (error: Exception) {
+            // An exception escaping a Thrift render callback can close the entire runtime's transport.
+            if (!paintFailed && !isDisposed) {
+                paintFailed = true
+                com.lgguan.linuxdo.plugin.common.LinuxDoLog.warn("Private JCEF paint failed: ${NetworkTrace.errorType(error)}")
+                SwingUtilities.invokeLater { scheduleResize() }
+            }
+            return
+        }
         component.repaint()
     }
 
@@ -224,8 +288,27 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
     private fun updateScreenInfo() {
         if (created && !isDisposed) {
             runtime.call(rawBrowser, "notifyScreenInfoChanged")
-            cefBrowser.wasResized(component.width, component.height)
+            scheduleResize()
         }
+    }
+
+    private fun scheduleResize() {
+        if (!SwingUtilities.isEventDispatchThread()) { SwingUtilities.invokeLater { scheduleResize() }; return }
+        viewSize = Dimension(component.width.coerceAtLeast(1), component.height.coerceAtLeast(1))
+        if (created && !isDisposed && !resizeTimer.isRunning) resizeTimer.start()
+    }
+
+    private fun resizeNativeView() {
+        if (!created || isDisposed || !runtime.isUsable) return
+        viewSize = Dimension(component.width.coerceAtLeast(1), component.height.coerceAtLeast(1))
+        resizeFrame = paintedFrames
+        repaintAttempts = 0
+        cefBrowser.wasResized(viewSize.width, viewSize.height)
+        // OSR viewport changes alone do not guarantee a new frame after a burst of resizes.
+        runtime.call(rawBrowser, "invalidate")
+        // CEF can apply its resize after that first invalidation. Confirm an actual
+        // frame at the requested size; bounded retries stop as soon as it arrives.
+        repaintTimer.restart()
     }
 
     internal fun adapt(value: Any?, target: Class<*>): Any? {
@@ -274,7 +357,16 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
         }.orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
     }
 
-    @Synchronized fun createImmediately() { if (!created && !isDisposed) { created = true; runtime.call(rawBrowser, "createImmediately") } }
+    @Synchronized fun createImmediately() {
+        if (!created && !isDisposed) {
+            created = true
+            viewSize = Dimension(component.width.coerceAtLeast(1), component.height.coerceAtLeast(1))
+            startupWatchdog = com.intellij.util.concurrency.AppExecutorUtil.getAppScheduledExecutorService().schedule({
+                if (!nativeReady && !isDisposed) runtime.fail("正文浏览器启动超时，请重试")
+            }, 25, java.util.concurrent.TimeUnit.SECONDS)
+            runtime.call(rawBrowser, "createImmediately")
+        }
+    }
     @Synchronized fun loadURL(url: String) {
         if (isDisposed) return
         if (!nativeReady) pendingUrl = url else runtime.call(rawBrowser, "loadURL", url)
@@ -288,7 +380,7 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
     fun newDocument() { documentBytes = null; documentTrust.renew() }
     fun isCurrentDocument(url: String?) = documentTrust.isCurrent(url)
     fun isCurrentFloorJump(url: String) = documentTrust.isFloorJump(url)
-    private fun documentResource(bytes: ByteArray): Any {
+    private fun documentResource(bytes: ByteArray, mime: String = "text/html"): Any {
         var offset = 0
         return runtime.handler("org.cef.handler.CefResourceHandler") { method, args ->
             when (method) {
@@ -296,8 +388,8 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
                 "processRequest" -> { runtime.call(args[1]!!, "Continue"); true }
                 "getResponseHeaders" -> {
                     runtime.call(args[0]!!, "setStatus", 200)
-                    runtime.call(args[0]!!, "setMimeType", "text/html")
-                    runtime.call(args[0]!!, "setHeaderMap", mapOf("Content-Type" to "text/html; charset=utf-8", "Cache-Control" to "no-store", "Content-Security-Policy" to "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: http: data: blob:; media-src https: http: blob:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"))
+                    runtime.call(args[0]!!, "setMimeType", mime)
+                    runtime.call(args[0]!!, "setHeaderMap", mapOf("Content-Type" to "$mime; charset=utf-8", "Cache-Control" to "no-store", "Content-Security-Policy" to "default-src 'none'; script-src 'unsafe-inline' https://linux.do/__linuxdo_plugin_assets/; style-src 'unsafe-inline'; img-src https: http: data: blob:; media-src https: http: blob:; frame-src https://player.bilibili.com https://www.youtube-nocookie.com; connect-src 'none'; object-src 'none'; base-uri https://linux.do; form-action 'none'"))
                     runtime.call(args[1]!!, "set", bytes.size)
                     null
                 }
@@ -314,13 +406,22 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
     }
     fun onUserNavigation(callback: (String) -> Boolean) { navigationHandler = callback }
     override fun dispose() {
-        if (isDisposed) return
+        if (!disposalStarted.compareAndSet(false, true)) return
         isDisposed = true
+        startupWatchdog?.cancel(false)
+        SwingUtilities.invokeLater { resizeTimer.stop(); repaintTimer.stop() }
         nativeReadyFuture.completeExceptionally(java.io.IOException("登录浏览器已关闭"))
         runtime.unregister(this)
-        runtime.call(rawBrowser, "close", true)
-        runtime.call(rawClient, "dispose")
-        synchronized(this) { image = null; popup = null; sharedCache = null; documentBytes = null; navigationHandler = null }
+        try {
+            if (runtime.isUsable) {
+                runtime.call(rawBrowser, "close", true)
+                runtime.call(rawClient, "dispose")
+            }
+        } finally {
+            synchronized(paintLock) { sharedCache = null; pixels = IntArray(0) }
+            synchronized(imageLock) { image = null; popup = null }
+            documentBytes = null; navigationHandler = null
+        }
     }
 
     inner class ClientHandlers {

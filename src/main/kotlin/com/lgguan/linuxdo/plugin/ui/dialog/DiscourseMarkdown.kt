@@ -22,7 +22,7 @@ internal object DiscourseMarkdown {
     fun render(source: String): String = ForumHtml.clean(blocks(source.replace("\r\n", "\n"), 0))
 
     private fun markdown(source: String): String {
-        val node = parser.parse(source)
+        val node = parser.parse(mathMarkup(source))
         node.accept(object : AbstractVisitor() {
             override fun visit(image: Image) {
                 if (image.destination.startsWith("upload://")) {
@@ -46,6 +46,41 @@ internal object DiscourseMarkdown {
             }
         })
         return renderer.render(node)
+    }
+
+    /** Preserve TeX before Markdown consumes underscores and backslash delimiters. */
+    private fun mathMarkup(source: String): String {
+        val result=StringBuilder();var index=0;var codeChar:Char?=null;var codeLength=0
+        while(index<source.length){
+            val char=source[index]
+            if(char=='`' || char=='~' && (index==0 || source[index-1]=='\n')){
+                var end=index+1;while(end<source.length && source[end]==char)end++
+                val size=end-index
+                if(codeChar==null && (char=='`' || size>=3)){codeChar=char;codeLength=size}
+                else if(codeChar==char && size>=codeLength)codeChar=null
+                result.append(source.substring(index,end));index=end;continue
+            }
+            if(codeChar==null && !(index>=4 && source.substring(source.lastIndexOf('\n',index-1)+1,index).startsWith("    "))){
+                val opening=when {source.startsWith("$$",index)->"$$";source.startsWith("\\[",index)->"\\[";source.startsWith("\\(",index)->"\\(";char=='$' && (index==0 || source[index-1]!='\\')->"$";else->null}
+                if(opening!=null){
+                    val closing=when(opening){"\\["->"\\]";"\\("->"\\)";else->opening}
+                    val end=source.indexOf(closing,index+opening.length)
+                    if(end>index+opening.length){
+                        val tex=source.substring(index+opening.length,end)
+                        val display=opening=="$$" || opening=="\\["
+                        if(display || !tex.contains('\n') && tex.firstOrNull()?.isWhitespace()==false && tex.lastOrNull()?.isWhitespace()==false){
+                            val tag=if(display)"div" else "span"
+                            if(display)result.append('\n')
+                            result.append("<$tag class=\"math\" data-math-source=\"${escape(tex)}\">${escape(tex)}</$tag>")
+                            if(display)result.append('\n')
+                            index=end+closing.length;continue
+                        }
+                    }
+                }
+            }
+            result.append(char);index++
+        }
+        return result.toString()
     }
 
     private fun blocks(source: String, depth: Int): String {

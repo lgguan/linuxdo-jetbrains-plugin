@@ -37,11 +37,28 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
     private val backgroundTasks = com.lgguan.linuxdo.plugin.common.BackgroundTasks()
 
     private val listenerLifetime = com.intellij.openapi.util.Disposer.newDisposable()
+    private val appearanceTimer = javax.swing.Timer(75) { updateAppearance() }.apply { isRepeats = false }
+    private var renderOptions = renderOptions()
+
+    private fun renderOptions(): Triple<Boolean, Boolean, Boolean> = LinuxDoSettingsState.getInstance().let {
+        Triple(it.foldImages, it.hideAvatars, it.categoryNamespaceFormat)
+    }
 
     private var jbCefBrowser: JBCefBrowser? = null
+    private var viewerGeneration = 0L
     private var jsQuery: JBCefJSQuery? = null
     private var fallbackPane: JEditorPane? = null
     @Volatile private var currentTopic: TopicDetailResponse? = null
+        set(value) {
+            if(value==null){field=null;return}
+            // Pending published replies and visible bodies share the same total cache budget.
+            val bounded=com.lgguan.linuxdo.plugin.model.PostCache.bound(publishedReplies.values+value.postStream.posts,currentPostNumber ?: value.postStream.posts.firstOrNull()?.postNumber ?: 1)
+            val ids=bounded.map { it.id }.toSet()
+            publishedReplies.keys.retainAll(ids)
+            bounded.filter { it.id in publishedReplies }.forEach { publishedReplies[it.id]=it }
+            val included=value.postStream.posts.map { it.id }.toSet()
+            field=value.copy(postStream=value.postStream.copy(posts=bounded.filter { it.id in included }))
+        }
     @Volatile private var disposed = false
     private var topicTask: java.util.concurrent.Future<*>? = null
     private var requestedTopicId: Long? = null
@@ -55,9 +72,14 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
     private val publishedReplies = linkedMapOf<Long, com.lgguan.linuxdo.plugin.model.Post>()
     private var readingClock = com.lgguan.linuxdo.plugin.service.ReadingClock()
     private var readingVersion = com.lgguan.linuxdo.plugin.net.SessionEpoch.current
+    private val readerController by lazy { TopicReaderController(project, backgroundTasks,
+        { currentTopic }, { currentTopic = it },
+        { key, version -> !disposed && !project.isDisposed && key == pageKey && version == readingVersion && version == com.lgguan.linuxdo.plugin.net.SessionEpoch.current },
+        { key, id, result -> jbCefBrowser?.cefBrowser?.executeJavaScript(
+            "window.linuxDoReaderResult && window.linuxDoReaderResult(${com.google.gson.Gson().toJson(key)},${com.google.gson.Gson().toJson(id)},${result});", "", 0) }) }
     private var editorSelected = false
     private val readingTimer = javax.swing.Timer(1000) {
-        if (!disposed && currentTopic != null && editorSelected && isShowing) {
+        if (!disposed && currentTopic != null && editorSelected && isShowing && jbCefBrowser?.runtime?.isUsable == true) {
             jbCefBrowser?.cefBrowser?.executeJavaScript("window.sampleDocReading && window.sampleDocReading();", "", 0)
         } else readingClock.sample(emptySet(), false)
         if (readingClock.due()) flushReading()
@@ -65,8 +87,10 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
 
     fun setSelected(selected: Boolean) {
         editorSelected = selected
+        if (selected && isShowing) jbCefBrowser?.component?.requestFocusInWindow()
         if (!selected) { readingClock.sample(emptySet(), false); flushReading() }
     }
+    fun preferredFocusedComponent(): javax.swing.JComponent = jbCefBrowser?.component ?: this
     private fun flushReading() {
         val pending = readingClock.drain()
         currentTopic?.let { LinuxDoReadTrackingService.getInstance().submitTimings(it.id, pending, readingVersion) }
@@ -93,20 +117,76 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
             ApplicationManager.getApplication().invokeLater {
                 if (disposed) return@invokeLater
                 if (jbCefBrowser?.isDisposed == true) setupViewer()
-                currentTopic?.let { renderTopic(it) }
+                val nextOptions = renderOptions()
+                if (renderOptions != nextOptions) {
+                    renderOptions = nextOptions
+                    currentTopic?.let { renderTopic(it, currentPostNumber) }
+                } else appearanceTimer.restart()
             }
+        }
+        val appearanceConnection = ApplicationManager.getApplication().messageBus.connect(listenerLifetime)
+        appearanceConnection.subscribe(com.intellij.openapi.editor.colors.EditorColorsManager.TOPIC,
+            com.intellij.openapi.editor.colors.EditorColorsListener { scheduleAppearanceUpdate() })
+        appearanceConnection.subscribe(com.intellij.ide.ui.LafManagerListener.TOPIC,
+            com.intellij.ide.ui.LafManagerListener { scheduleAppearanceUpdate() })
+    }
+
+    private fun scheduleAppearanceUpdate() {
+        ApplicationManager.getApplication().invokeLater {
+            if (!disposed && !project.isDisposed) appearanceTimer.restart()
         }
     }
 
+    /** Replace styling in the current document; retain loaded floors, selection and open controls. */
+    private fun updateAppearance() {
+        if (disposed || project.isDisposed || currentTopic == null) return
+        val theme = EditorColorSchemeAdapter.getCurrentThemeColors()
+        val settings = LinuxDoSettingsState.getInstance()
+        val css = com.lgguan.linuxdo.plugin.theme.DocCamouflageCssBuilder.buildCss(theme, settings) +
+            com.lgguan.linuxdo.plugin.theme.ForumContent.css
+        val encodedCss = com.google.gson.Gson().toJson(css)
+        jbCefBrowser?.cefBrowser?.executeJavaScript("""
+            (function() {
+                var style = document.getElementById('linuxdo-reader-theme');
+                if (!style) return;
+                var anchor = Array.from(document.querySelectorAll('.post-entry')).find(function(el) { return el.getBoundingClientRect().bottom > 0; });
+                var top = anchor && anchor.getBoundingClientRect().top;
+                style.textContent = $encodedCss;
+                document.body.style.removeProperty('font-size');
+                document.body.style.removeProperty('line-height');
+                document.querySelector('.doc-container').style.removeProperty('max-width');
+                if (window.linuxDoPage) Object.assign(window.linuxDoPage, {
+                    defaultFontSize: ${(theme.fontSize + 2).coerceAtLeast(15)}, fontSize: ${settings.readingFontSize},
+                    lineHeight: ${settings.readingLineHeight}, width: ${settings.readingWidth}
+                });
+                window.dispatchEvent(new Event('resize'));
+                if (anchor) requestAnimationFrame(function() { window.scrollBy(0, anchor.getBoundingClientRect().top - top); });
+            })();
+        """.trimIndent(), "", 0)
+        fallbackPane?.let { currentTopic?.let { topic -> renderTopic(topic, currentPostNumber) } }
+    }
+
     private fun setupViewer() {
+        val generation = ++viewerGeneration
+        jbCefBrowser?.let { com.intellij.openapi.util.Disposer.dispose(it) }
+        jbCefBrowser = null
+        jsQuery = null
         removeAll()
         if (com.lgguan.linuxdo.plugin.net.IsolatedCefRuntime.isSupported()) {
             add(JBLabel("正在启动正文浏览器...", SwingConstants.CENTER), BorderLayout.CENTER)
-            com.lgguan.linuxdo.plugin.net.IsolatedCefRuntime.prepare { prepared ->
-                if (disposed || project.isDisposed) return@prepare
-                prepared.onSuccess { runtime ->
-                    val browser = JBCefBrowser(runtime)
+            com.lgguan.linuxdo.plugin.net.IsolatedCefRuntime.prepareBrowser { prepared ->
+                if (disposed || project.isDisposed || generation != viewerGeneration) {
+                    prepared.getOrNull()?.let { com.intellij.openapi.util.Disposer.dispose(it) }
+                    return@prepareBrowser
+                }
+                prepared.onSuccess { browser ->
                     jbCefBrowser = browser
+                    browser.onRuntimeFailure { reason ->
+                        if (!disposed && !project.isDisposed && generation == viewerGeneration && jbCefBrowser === browser) {
+                            readingClock.sample(emptySet(), false)
+                            showBrowserFailure(reason)
+                        }
+                    }
                     browser.onRefreshRequested(::refreshReplies)
                     com.intellij.openapi.util.Disposer.register(listenerLifetime, browser)
                     setupJsBridges(browser)
@@ -117,10 +197,10 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                         ?: loadPlaceholder("Select an issue / document from the list to view.")
                     revalidate()
                     repaint()
+                    if (editorSelected && isShowing) browser.component.requestFocusInWindow()
                 }.onFailure {
-                    removeAll()
-                    add(JBLabel("正文浏览器启动失败，请检查插件网络诊断"), BorderLayout.CENTER)
-                    revalidate()
+                    com.lgguan.linuxdo.plugin.common.LinuxDoLog.warn("Reader startup failed: ${com.lgguan.linuxdo.plugin.net.NetworkTrace.errorType(it)}")
+                    showBrowserFailure("正文浏览器启动失败或连接已断开")
                 }
             }
         } else {
@@ -133,6 +213,24 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
             add(JBScrollPane(pane), BorderLayout.CENTER)
             pane.text = "<html><body><p style='padding:16px;color:#888;'>Select an issue from the list</p></body></html>"
         }
+        revalidate()
+        repaint()
+    }
+
+    private fun showBrowserFailure(reason: String) {
+        removeAll()
+        add(JPanel(java.awt.GridBagLayout()).apply {
+            val box = JPanel().apply {
+                layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
+                add(JBLabel(reason).apply { alignmentX = 0.5f })
+                add(javax.swing.Box.createVerticalStrut(12))
+                add(javax.swing.JButton("重试正文浏览器").apply {
+                    alignmentX = 0.5f
+                    addActionListener { if (!disposed && !project.isDisposed) setupViewer() }
+                })
+            }
+            add(box)
+        }, BorderLayout.CENTER)
         revalidate()
         repaint()
     }
@@ -152,6 +250,35 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                 com.lgguan.linuxdo.plugin.common.LinuxDoLog.info("CEF bridge event: $action")
 
                 when (action) {
+                    "readerAction" -> {
+                        val key = json?.get("key")?.asString.orEmpty()
+                        val requestId = json?.get("requestId")?.asString.orEmpty()
+                        val operation = json?.get("operation")?.asString.orEmpty()
+                        val postId = json?.get("postId")?.asString?.toLongOrNull() ?: 0L
+                        val input = json?.getAsJsonObject("input") ?: com.google.gson.JsonObject()
+                        ApplicationManager.getApplication().invokeLater {
+                            if (disposed || key != pageKey || callbackPage != browser.documentTrust.token || callbackEpoch != readingVersion || callbackEpoch != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
+                            readerController.handle(key,requestId,operation,postId,input,callbackEpoch)
+                        }
+                    }
+                    "saveImage" -> {
+                        val url=json?.get("url")?.asString.orEmpty()
+                        ApplicationManager.getApplication().invokeLater {
+                            if(disposed || callbackPage!=browser.documentTrust.token || callbackEpoch!=readingVersion || callbackEpoch!=com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
+                            if(!com.lgguan.linuxdo.plugin.net.DocumentTrust.isWebLink(url))return@invokeLater
+                            val chooser=javax.swing.JFileChooser().apply { selectedFile=java.io.File(java.net.URI(url).path.substringAfterLast('/').ifBlank { "image.png" }) }
+                            if(chooser.showSaveDialog(this)==javax.swing.JFileChooser.APPROVE_OPTION){
+                                val target=chooser.selectedFile
+                                if(target.exists() && Messages.showYesNoDialog(project,"替换已有文件 ${target.name}？","保存图片",Messages.getQuestionIcon())!=Messages.YES)return@invokeLater
+                                backgroundTasks.submit {
+                                    val result=runCatching { val bytes=downloadClipboardImage(url);if(disposed || callbackPage!=browser.documentTrust.token || callbackEpoch!=com.lgguan.linuxdo.plugin.net.SessionEpoch.current)return@runCatching;java.nio.file.Files.write(target.toPath(),bytes) }
+                                    ApplicationManager.getApplication().invokeLater {
+                                        if(!disposed && callbackPage==browser.documentTrust.token && callbackEpoch==com.lgguan.linuxdo.plugin.net.SessionEpoch.current)browser.cefBrowser.executeJavaScript("showDocToast(${com.google.gson.Gson().toJson(if(result.isSuccess) "图片已保存" else "图片保存失败")});","",0)
+                                    }
+                                }
+                            }
+                        }
+                    }
                     "copyCode" -> {
                         val text = json?.get("text")?.asString.orEmpty()
                         val requestId = json?.get("requestId")?.asString.orEmpty()
@@ -274,23 +401,12 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                         }
                     }
                     "like" -> {
-                        val postId = json?.get("postId")?.asLong ?: rawPayload.split(":").getOrNull(1)?.toLongOrNull()
-                        val like = json?.get("like")?.asBoolean ?: rawPayload.split(":").getOrNull(2)?.toBooleanStrictOrNull() ?: true
-                        if (postId != null && currentTopic?.postStream?.posts?.any { it.id == postId } == true) {
-                            backgroundTasks.submit {
-                                com.lgguan.linuxdo.plugin.common.LinuxDoLog.info("Toggling like on server: postId=$postId, like=$like")
-                                if (disposed || callbackPage != browser.documentTrust.token) return@submit
-                                val result = DiscourseApiClient.toggleLike(postId, like, callbackEpoch)
-                                result.onSuccess {
-                                    com.lgguan.linuxdo.plugin.common.LinuxDoLog.info("Like toggled successfully for post $postId")
-                                }.onFailure { err ->
-                                    com.lgguan.linuxdo.plugin.common.LinuxDoLog.warn("Like failed for post $postId: ${err.message}")
-                                    ApplicationManager.getApplication().invokeLater {
-                            if (disposed || project.isDisposed || callbackGeneration != loadGeneration || callbackPage != browser.documentTrust.token || callbackEpoch != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
-                                        reloadCurrentTopic()
-                                    }
-                                }
-                            }
+                        val id=json?.get("postId")?.asLong ?: 0L
+                        val input=com.google.gson.JsonObject().apply { addProperty("like",json?.get("like")?.asBoolean==true) }
+                        val key=pageKey
+                        ApplicationManager.getApplication().invokeLater {
+                            if(!disposed && key==pageKey && callbackPage==browser.documentTrust.token && callbackEpoch==readingVersion && callbackEpoch==com.lgguan.linuxdo.plugin.net.SessionEpoch.current)
+                                readerController.handle(key,java.util.UUID.randomUUID().toString(),"like",id,input,callbackEpoch)
                         }
                     }
                     "navigationReturn" -> {
@@ -308,12 +424,26 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                             ApplicationManager.getApplication().invokeLater {
                             if (disposed || project.isDisposed || callbackGeneration != loadGeneration || callbackPage != browser.documentTrust.token || callbackEpoch != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
                                 val key = pageKey
-                                val selectedPost = currentTopic?.postStream?.posts?.firstOrNull { it.postNumber == floor } ?: return@invokeLater
+                                val selectedPost = currentTopic?.postStream?.posts?.firstOrNull { it.postNumber == floor }
+                                if (!com.lgguan.linuxdo.plugin.model.PostCapabilities.reply(topic)) return@invokeLater
                                 if (!com.lgguan.linuxdo.plugin.service.LinuxDoAuthService.getInstance().isLoggedIn) {
                                     openAuthDialog()
                                     return@invokeLater
                                 }
                                 val selected = json?.get("text")?.asString.orEmpty()
+                                if (selectedPost == null) {
+                                    backgroundTasks.submit {
+                                        if (disposed || callbackPage != browser.documentTrust.token || callbackEpoch != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@submit
+                                        val target = DiscourseApiClient.getTopicAroundPost(topic.id,floor).getOrNull()?.postStream?.posts?.firstOrNull { it.postNumber==floor }
+                                        ApplicationManager.getApplication().invokeLater {
+                                            if(disposed || key!=pageKey || callbackEpoch!=com.lgguan.linuxdo.plugin.net.SessionEpoch.current)return@invokeLater
+                                            if(target==null){browser.cefBrowser.executeJavaScript("showDocToast('引用楼层不可用，请先定位后重试');","",0);return@invokeLater}
+                                            val quote=if(action=="quoteReply" && selected.isNotBlank() && selected.length<=100_000)com.lgguan.linuxdo.plugin.ui.dialog.DiscourseQuote.format(target.username,topic.id,floor,selected) else null
+                                            CommitReplyDialog.open(project,topic.id,floor,target.username,target.id,quote){post->if(!disposed && key==pageKey)showPublishedReply(post)}
+                                        }
+                                    }
+                                    return@invokeLater
+                                }
                                 val quote = if (action == "quoteReply" && selected.isNotBlank() && selected.length <= 100_000)
                                     com.lgguan.linuxdo.plugin.ui.dialog.DiscourseQuote.format(selectedPost.username, topic.id, floor, selected) else null
                                 CommitReplyDialog.open(project, topic.id, floor, selectedPost.username, selectedPost.id, quote) { post ->
@@ -330,7 +460,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                             ApplicationManager.getApplication().invokeLater {
                             if (disposed || project.isDisposed || callbackGeneration != loadGeneration || callbackPage != browser.documentTrust.token || callbackEpoch != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
                                 val dialog = com.lgguan.linuxdo.plugin.ui.dialog.BoostQuickReplyDialog(project, postId, floor, author) {
-                                    reloadCurrentTopic()
+                                    readerController.handle(pageKey,java.util.UUID.randomUUID().toString(),"postInfo",postId,com.google.gson.JsonObject(),callbackEpoch)
                                 }
                                 dialog.show()
                             }
@@ -381,10 +511,13 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                             val active = editorSelected && isShowing && javax.swing.SwingUtilities.getWindowAncestor(this)?.isActive == true
                             val topic = currentTopic ?: return@invokeLater
                             val valid = floors.intersect(topic.postStream.posts.map { it.postNumber }.toSet())
-                            readingClock.sample(valid, active).keys.forEach { floor ->
+                            val readFloors = readingClock.sample(valid, active).keys
+                            readFloors.forEach { floor ->
                                 currentPostNumber = floor
                                 LinuxDoReadTrackingService.getInstance().markFloorRead(topic.id, floor)
                             }
+                            if (readFloors.isNotEmpty()) jbCefBrowser?.cefBrowser?.executeJavaScript(
+                                "window.applyDocRead && window.applyDocRead(${com.google.gson.Gson().toJson(readFloors)});", "", 0)
                         }
                     }
                     "reportRead" -> {
@@ -435,6 +568,12 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
 
     private fun buildBridgeScript(query: JBCefJSQuery): String = """
                         window.intellijBridge = {
+                            readerAction: function(key, requestId, operation, postId, input) {
+                                ${query.inject(" JSON.stringify({ action: 'readerAction', key: key, requestId: requestId, operation: operation, postId: postId, input: input }) ")}
+                            },
+                            saveImage: function(url) {
+                                ${query.inject(" JSON.stringify({ action: 'saveImage', url: url }) ")}
+                            },
                             navigationReturn: function(key, floor) {
                                 ${query.inject(" JSON.stringify({ action: 'navigationReturn', key: key, floor: floor }) ")}
                             },
@@ -514,12 +653,12 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
             return
         }
 
-        val topicPattern = Regex("""https?://linux\.do/t/(?:[^/]+/)?(\d+)""")
+        val topicPattern = Regex("""https?://linux\.do/t/(?:[^/]+/)?(\d+)(?:/(\d+))?""")
         val match = topicPattern.find(url)
         if (match != null) {
             val targetTopicId = match.groupValues[1].toLongOrNull()
             if (targetTopicId != null) {
-                LinuxDoEditorOpener.openTopic(project, targetTopicId)
+                LinuxDoEditorOpener.openTopic(project, targetTopicId, postNumber = match.groupValues.getOrNull(2)?.toIntOrNull())
                 return
             }
         }
@@ -732,6 +871,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
 
     private fun renderTopic(detail: TopicDetailResponse, targetPostNumber: Int? = null) {
         if (disposed) return
+        renderOptions = renderOptions()
         jbCefBrowser?.newDocument()
         pageKey = java.util.UUID.randomUUID().toString()
         loadingPosts = false
@@ -755,7 +895,12 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                 targetPostNumber = targetPostNumber,
                 paginationScript = "window.linuxDoPage = " + com.google.gson.Gson().toJson(mapOf(
                     "highest" to (detail.highestPostNumber ?: detail.postStream.posts.maxOfOrNull { it.postNumber } ?: 1),
-                    "key" to pageKey, "returnFloor" to returnFloors[detail.id], "stream" to detail.postStream.stream.orEmpty().map { it.toString() }
+                    "key" to pageKey, "returnFloor" to returnFloors[detail.id], "stream" to detail.postStream.stream.orEmpty().map { it.toString() },
+                    "topic" to detail.id, "author" to (detail.details?.createdBy?.username ?: detail.postStream.posts.firstOrNull { it.postNumber==1 }?.username),
+                    "unreadFloor" to ((detail.lastReadPostNumber ?: 0)+1).takeIf { it <= (detail.highestPostNumber ?: 1) },
+                    "notificationLevel" to detail.details?.notificationLevel, "loggedIn" to com.lgguan.linuxdo.plugin.service.LinuxDoAuthService.getInstance().isLoggedIn,
+                    "fontSize" to settings.readingFontSize, "defaultFontSize" to (theme.fontSize+2).coerceAtLeast(15), "lineHeight" to settings.readingLineHeight, "width" to settings.readingWidth,
+                    "canVote" to detail.canVote, "userVoted" to detail.userVoted, "voteCount" to detail.voteCount, "votesLeft" to detail.votesLeft
                 )) + ";\n" + paginationSource
             )
 
@@ -830,6 +975,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
     }
 
     override fun dispose() {
+        appearanceTimer.stop()
         topicTask?.cancel(true)
         backgroundTasks.dispose()
         if (disposed) return
@@ -864,7 +1010,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                     val posts = received.filter { it.id in ids }.distinctBy { it.id }.sortedBy { it.postNumber }
                     val current = currentTopic ?: return@mapCatching ""
                     currentTopic = current.copy(postStream = current.postStream.copy(
-                        posts = (current.postStream.posts + posts).distinctBy { it.id }.sortedBy { it.postNumber }))
+                        posts = com.lgguan.linuxdo.plugin.model.PostCache.bound(current.postStream.posts + posts, currentPostNumber ?: posts.firstOrNull()?.postNumber ?: 1)))
                     TopicDocumentRenderer.buildPostFragment(current, posts, LinuxDoSettingsState.getInstance())
                 }
                 jbCefBrowser?.cefBrowser?.executeJavaScript(
@@ -880,7 +1026,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
         refreshingPosts = true
         val session = com.lgguan.linuxdo.plugin.net.SessionEpoch.current
         backgroundTasks.submit {
-            val fetched = DiscourseApiClient.getTopicDetail(topic.id, trackVisit = false)
+            val fetched = readerController.readAround(key,topic.id,currentPostNumber ?: 1,session)
             ApplicationManager.getApplication().invokeLater {
                 if (disposed || project.isDisposed || key != pageKey || session != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
                 refreshingPosts = false
@@ -888,8 +1034,9 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                 result.onSuccess { currentTopic = it }
                 val gson = com.google.gson.Gson()
                 val stream = result.getOrNull()?.postStream?.stream.orEmpty().map { it.toString() }
+                val fragment = fetched.getOrNull()?.let { TopicDocumentRenderer.buildPostFragment(it,it.postStream.posts,LinuxDoSettingsState.getInstance()) }.orEmpty()
                 jbCefBrowser?.cefBrowser?.executeJavaScript(
-                    "window.linuxDoPagination && window.linuxDoPagination.refreshed(${gson.toJson(key)},${gson.toJson(stream)},${result.isFailure},${currentTopic?.highestPostNumber ?: 1},${(result.exceptionOrNull() as? com.lgguan.linuxdo.plugin.net.RateLimitException)?.retryAfterSeconds ?: 0});", "", 0)
+                    "window.linuxDoPagination && window.linuxDoPagination.refreshed(${gson.toJson(key)},${gson.toJson(stream)},${result.isFailure},${currentTopic?.highestPostNumber ?: 1},${(result.exceptionOrNull() as? com.lgguan.linuxdo.plugin.net.RateLimitException)?.retryAfterSeconds ?: 0},${gson.toJson(fragment)});", "", 0)
             }
         }
     }
@@ -899,7 +1046,8 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
         val merged = if (floor == null) com.lgguan.linuxdo.plugin.model.TopicRefresh.merge(current, fresh)
             else com.lgguan.linuxdo.plugin.model.TopicRefresh.mergeAround(current, fresh, floor)
         publishedReplies.keys.removeAll(fresh.postStream.stream.orEmpty().toSet())
-        return publishedReplies.values.fold(merged) { topic, post -> com.lgguan.linuxdo.plugin.model.TopicRefresh.addReply(topic, post) }
+        val refreshed = publishedReplies.values.fold(merged) { topic, post -> com.lgguan.linuxdo.plugin.model.TopicRefresh.addReply(topic, post) }
+        return refreshed.copy(postStream=refreshed.postStream.copy(posts=com.lgguan.linuxdo.plugin.model.PostCache.bound(refreshed.postStream.posts,floor ?: currentPostNumber ?: 1)))
     }
 
     private fun loadFloor(key: String, requestId: String, floor: Int) {
@@ -910,7 +1058,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
         val settings = LinuxDoSettingsState.getInstance()
         val username = com.lgguan.linuxdo.plugin.service.LinuxDoAuthService.getInstance().currentUser?.username
         backgroundTasks.submit {
-            val fetched = DiscourseApiClient.getTopicAroundPost(topic.id, floor).mapCatching { around ->
+            val fetched = readerController.readAround(key,topic.id,floor,session).mapCatching { around ->
                 val posts = around.postStream.posts.sortedBy { kotlin.math.abs(it.postNumber.toLong() - floor) }.take(20).sortedBy { it.postNumber }
                 val bounded = around.copy(postStream = around.postStream.copy(posts = posts))
                 com.lgguan.linuxdo.plugin.model.TopicRefresh.mergeAround(topic, bounded, floor)

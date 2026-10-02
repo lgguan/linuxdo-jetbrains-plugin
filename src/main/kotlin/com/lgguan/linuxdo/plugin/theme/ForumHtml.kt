@@ -13,6 +13,8 @@ internal object ForumHtml {
         .addAttributes("aside", "data-topic", "data-post", "data-username")
         .addAttributes("pre", "data-code-wrap")
         .addAttributes("pre", "tabindex", "aria-label")
+        .addAttributes("span", "data-math-source")
+        .addAttributes("div", "data-math-source", "data-poll-name", "data-poll-type", "data-poll-status")
         .addAttributes("h1", "id").addAttributes("h2", "id").addAttributes("h3", "id")
         .addAttributes("h4", "id").addAttributes("h5", "id").addAttributes("h6", "id")
         .addAttributes("a", "name")
@@ -34,6 +36,17 @@ internal object ForumHtml {
     fun clean(html: String): String {
         val input = Jsoup.parseBodyFragment(html)
         input.outputSettings().prettyPrint(false)
+        // An iframe is untrusted data until the user explicitly loads a known player.
+        input.select("iframe").forEach { frame ->
+            val source = frame.attr("src").ifBlank { frame.attr("data-src") }
+            val url = runCatching { java.net.URI("https://linux.do/").resolve(source) }.getOrNull()
+            val card = org.jsoup.nodes.Element("div").addClass("forum-embed")
+            card.text(frame.attr("title").ifBlank { "嵌入内容" })
+            if (url != null && url.scheme in setOf("http", "https") && url.host != null && url.userInfo == null) {
+                card.appendElement("a").attr("href", url.toASCIIString()).addClass("forum-embed-source").text("打开嵌入内容")
+            }
+            frame.replaceWith(card)
+        }
         input.select("a[href]").filter { it.attr("href").isBlank() }.forEach { it.unwrap() }
         val document = Jsoup.parseBodyFragment(Jsoup.clean(input.body().html(), "https://linux.do/", allowed,
             org.jsoup.nodes.Document.OutputSettings().prettyPrint(false)))

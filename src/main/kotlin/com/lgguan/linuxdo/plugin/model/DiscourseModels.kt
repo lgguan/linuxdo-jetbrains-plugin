@@ -81,7 +81,17 @@ data class TopicDetailResponse(
     @SerializedName("views") val views: Int = 0,
     @SerializedName("like_count") val likeCount: Int = 0,
     @SerializedName("last_read_post_number") val lastReadPostNumber: Int? = null,
-    @SerializedName("highest_post_number") val highestPostNumber: Int? = null
+    @SerializedName("highest_post_number") val highestPostNumber: Int? = null,
+    @SerializedName("closed") val closed: Boolean? = null,
+    @SerializedName("archived") val archived: Boolean? = null,
+    @SerializedName("details") val details: TopicPermissions? = null,
+    @SerializedName("can_vote") val canVote: Boolean? = null,
+    @SerializedName("user_voted") val userVoted: Boolean? = null,
+    @SerializedName("vote_count") val voteCount: Int? = null,
+    @SerializedName("votes_left") val votesLeft: Int? = null,
+    @SerializedName("is_post_voting") val isPostVoting: Boolean? = null,
+    @SerializedName("accepted_answer") val acceptedAnswer: com.google.gson.JsonObject? = null,
+    @SerializedName("valid_reactions") val validReactions: List<String>? = null
 )
 
 data class PostStream(
@@ -114,7 +124,31 @@ data class Post(
     @SerializedName("topic_id") val topicId: Long? = null,
     @SerializedName("topic_slug") val topicSlug: String? = null,
     @SerializedName("actions_summary") val actionsSummary: List<ActionSummary>? = null,
-    @SerializedName("boosts") val boosts: List<PostBoost>? = null
+    @SerializedName("boosts") val boosts: List<PostBoost>? = null,
+    @SerializedName("yours") val yours: Boolean? = null,
+    @SerializedName("can_edit") val canEdit: Boolean? = null,
+    @SerializedName("can_delete") val canDelete: Boolean? = null,
+    @SerializedName("can_recover") val canRecover: Boolean? = null,
+    @SerializedName("can_view_edit_history") val canViewEditHistory: Boolean? = null,
+    @SerializedName("version") val version: Int? = null,
+    @SerializedName("edit_reason") val editReason: String? = null,
+    @SerializedName("deleted_at") val deletedAt: String? = null,
+    @SerializedName("user_deleted") val userDeleted: Boolean? = null,
+    @SerializedName("bookmarked") val bookmarked: Boolean? = null,
+    @SerializedName("bookmark_id") val bookmarkId: Long? = null,
+    @SerializedName("bookmark_name") val bookmarkName: String? = null,
+    @SerializedName("bookmark_reminder_at") val bookmarkReminderAt: String? = null,
+    @SerializedName("reactions") val reactions: List<Reaction>? = null,
+    @SerializedName("current_user_reaction") val currentUserReaction: UserReaction? = null,
+    @SerializedName("can_accept_answer") val canAcceptAnswer: Boolean? = null,
+    @SerializedName("can_unaccept_answer") val canUnacceptAnswer: Boolean? = null,
+    @SerializedName("accepted_answer") val acceptedAnswer: Boolean? = null,
+    @SerializedName("can_vote") val canVote: Boolean? = null,
+    @SerializedName("post_voting_vote_count") val postVotingVoteCount: Int? = null,
+    @SerializedName("post_voting_user_voted") val postVotingUserVoted: Boolean? = null,
+    @SerializedName("post_voting_user_voted_direction") val postVotingDirection: String? = null,
+    @SerializedName("polls") val polls: List<com.google.gson.JsonObject>? = null,
+    @SerializedName("polls_votes") val pollsVotes: com.google.gson.JsonObject? = null
 ) {
     fun getLikeCount(): Int {
         return actionsSummary?.firstOrNull { it.id == 2 }?.count ?: 0
@@ -169,8 +203,17 @@ data class ActionSummary(
     @SerializedName("id") val id: Int, // 2 = like
     @SerializedName("count") val count: Int = 0,
     @SerializedName("acted") val acted: Boolean? = false,
-    @SerializedName("can_act") val canAct: Boolean? = true
+    @SerializedName("can_act") val canAct: Boolean? = null,
+    @SerializedName("can_undo") val canUndo: Boolean? = null
 )
+
+data class TopicPermissions(
+    @SerializedName("can_create_post") val canCreatePost: Boolean? = null,
+    @SerializedName("notification_level") val notificationLevel: Int? = null,
+    @SerializedName("created_by") val createdBy: BoostUser? = null
+)
+data class Reaction(@SerializedName("id") val id: String, @SerializedName("count") val count: Int = 0)
+data class UserReaction(@SerializedName("id") val id: String?, @SerializedName("can_undo") val canUndo: Boolean? = null)
 
 data class CurrentUserResponse(
     @SerializedName("current_user") val currentUser: UserInfo? = null

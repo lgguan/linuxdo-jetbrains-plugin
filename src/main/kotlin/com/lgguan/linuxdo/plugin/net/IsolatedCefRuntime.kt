@@ -52,7 +52,12 @@ class IsolatedCefRuntime private constructor(val config: LinuxDoNetworkConfig) :
         private set
     private lateinit var app: Any
     private val initialized = AtomicBoolean(false)
+    private val ready = CompletableFuture<Void>()
+    internal val failure = CompletableFuture<String>()
+    @Volatile private var ownedProcess: Process? = null
+    val isUsable: Boolean get() = !disposed && !failure.isDone && ownedProcess?.isAlive != false
     private val nativeDisposalStarted = AtomicBoolean(false)
+    private val disposalStarted = AtomicBoolean(false)
     private val termination = CompletableFuture<Void>()
     private var retirementWatchdog: ScheduledFuture<*>? = null
     private var startupWatchdog: ScheduledFuture<*>? = null
@@ -111,16 +116,43 @@ class IsolatedCefRuntime private constructor(val config: LinuxDoNetworkConfig) :
             // Remote mode is set on the private classloader's CefApp, never the IDE's class.
             cefApp.getMethod("setIsRemoteEnabled", Boolean::class.javaPrimitiveType).invoke(null, true)
             val transportClass = type("com.jetbrains.cef.remote.ThriftTransport")
-            val pipe = transportClass.getMethod("getServerPipe", String::class.java).invoke(null, "linuxdo-${UUID.randomUUID()}")
-            val transport = transportClass.getConstructor(String::class.java).newInstance(pipe)
+            val transport = if (layout.platform == HostPlatform.WINDOWS) {
+                // JBR's named-pipe write can remain blocked after cef_server exits, holding
+                // RpcExecutor's monitor and preventing shutdown/recreation. Use the IDE's
+                // loopback TCP transport with a private port, never its default server.
+                // The IDE may have selected its default ports before opening their sockets.
+                // Exclude those reserved transports as well as this loader's defaults.
+                val platformTransport = Class.forName("com.jetbrains.cef.remote.ThriftTransport", true, platformCef.classLoader)
+                val reserved = mutableSetOf<Int>()
+                listOf(platformTransport, transportClass).forEach { api ->
+                    listOf("ourDefaultServer", "ourDefaultClient").forEach { name ->
+                        val endpoint = api.getField(name).get(null)
+                        val port = call(endpoint, "getPort") as Int
+                        if (port > 0) reserved += port
+                    }
+                }
+                val port = transportClass.getMethod("findFreePort", Int::class.javaPrimitiveType,
+                    Int::class.javaPrimitiveType, Set::class.java).invoke(null, 49152, 65535, reserved) as Int
+                transportClass.getConstructor(Int::class.javaPrimitiveType).newInstance(port)
+            } else {
+                val pipe = transportClass.getMethod("getServerPipe", String::class.java).invoke(null, "linuxdo-${UUID.randomUUID()}")
+                transportClass.getConstructor(String::class.java).newInstance(pipe)
+            }
             val server = call(jcefConfig, "getServerExe") as File
             check(server.canonicalFile == layout.serverExecutable.canonicalFile) { "JCEF 启动配置与原生组件目录不匹配" }
             app = cefApp.getMethod("getInstance", Array<String>::class.java, type("org.cef.CefSettings"), transportClass, File::class.java)
                 .invoke(null, args.toTypedArray(), settings, transport, server)
+            call(app, "setDisconnectionCallback", Runnable { fail("正文浏览器连接已断开，请重试") })
             call(app, "onInitialization", handler("org.cef.handler.CefAppStateHandler") { _, values ->
                 if (values.firstOrNull().toString() == "INITIALIZED") {
                     initialized.set(true)
                     startupWatchdog?.cancel(false)
+                    ownedProcess = nativeProcess()
+                    ownedProcess?.onExit()?.thenRun {
+                        termination.complete(null)
+                        if (!disposed) fail("正文浏览器进程已退出，请重试")
+                    }
+                    ready.complete(null)
                     if (disposed) finishNativeDisposal()
                     else NetworkTrace.event("private-runtime", "JCEF", "initialized", "profile" to profile.absolutePath)
                 }
@@ -133,7 +165,7 @@ class IsolatedCefRuntime private constructor(val config: LinuxDoNetworkConfig) :
                     // CefApp.dispose() in state NEW only changes the Java state. It does
                     // not stop the already launched server. Retire this failed instance
                     // instead of returning it on every subsequent browser retry.
-                    dispose()
+                    fail(startupFailure!!)
                 }
             }, 25, TimeUnit.SECONDS)
             if (initialized.get()) startupWatchdog?.cancel(false)
@@ -202,10 +234,16 @@ class IsolatedCefRuntime private constructor(val config: LinuxDoNetworkConfig) :
     }
 
     fun newClient(): Any {
-        check(!disposed) { startupFailure ?: "插件 JCEF 已关闭" }
+        check(isUsable) { startupFailure ?: "插件 JCEF 已关闭" }
         return call(app, "createClient")!!
     }
-    internal fun register(browser: LinuxDoBrowser) { browsers += browser }
+    internal fun register(browser: LinuxDoBrowser) {
+        browsers += browser
+        if (!isUsable) {
+            browser.runtimeFailed(startupFailure ?: "正文浏览器连接已断开")
+            ApplicationManager.getApplication().executeOnPooledThread { Disposer.dispose(browser) }
+        }
+    }
     internal fun unregister(browser: LinuxDoBrowser) { browsers -= browser }
     fun cookies(): Any = type("org.cef.network.CefCookieManager").getMethod("getGlobalManager").invoke(null)
 
@@ -241,10 +279,26 @@ class IsolatedCefRuntime private constructor(val config: LinuxDoNetworkConfig) :
         return ready
     }
 
-    @Synchronized override fun dispose() {
-        if (disposed) return
+    /** Never dispose synchronously from the transport callback: it owns the RPC locks. */
+    internal fun fail(reason: String) {
+        if (disposed || !failure.complete(reason)) return
+        startupFailure = reason
+        ready.completeExceptionally(java.io.IOException(reason))
+        browsers.toList().forEach { it.runtimeFailed(reason) }
+        com.lgguan.linuxdo.plugin.common.LinuxDoLog.warn(reason)
+        ApplicationManager.getApplication().executeOnPooledThread { Disposer.dispose(this) }
+    }
+
+    override fun dispose() {
+        if (!disposalStarted.compareAndSet(false, true)) return
         disposed = true
+        ready.completeExceptionally(java.io.IOException(startupFailure ?: "插件 JCEF 已关闭"))
         startupWatchdog?.cancel(false)
+        // Arm retirement before any native cleanup, which can itself stop responding.
+        retirementWatchdog = AppExecutorUtil.getAppScheduledExecutorService().schedule({
+            if (!termination.isDone) forceNativeDisposal()
+        }, 5, TimeUnit.SECONDS)
+        termination.whenComplete { _, _ -> retirementWatchdog?.cancel(false) }
         browsers.toList().forEach { browser ->
             runCatching { Disposer.dispose(browser) }.onFailure {
                 com.lgguan.linuxdo.plugin.common.LinuxDoLog.warn("Private JCEF browser cleanup failed: ${NetworkTrace.errorType(it)}")
@@ -253,10 +307,6 @@ class IsolatedCefRuntime private constructor(val config: LinuxDoNetworkConfig) :
         // CefApp.dispose() in NEW races its initialization thread and leaves a live server.
         // Retire after initialization, or stop our exact process if startup never completes.
         if (initialized.get()) finishNativeDisposal()
-        retirementWatchdog = AppExecutorUtil.getAppScheduledExecutorService().schedule({
-            if (!termination.isDone) forceNativeDisposal()
-        }, 5, TimeUnit.SECONDS)
-        termination.whenComplete { _, _ -> retirementWatchdog?.cancel(false) }
     }
 
     private fun nativeProcess(): Process? {
@@ -271,19 +321,21 @@ class IsolatedCefRuntime private constructor(val config: LinuxDoNetworkConfig) :
 
     private fun finishNativeDisposal() {
         if (!nativeDisposalStarted.compareAndSet(false, true)) return
-        runCatching {
-            val process = nativeProcess()
-            call(app, "dispose")
-            if (process == null || !process.isAlive) termination.complete(null)
-            else process.onExit().thenRun { termination.complete(null) }
-        }.onFailure {
-            com.lgguan.linuxdo.plugin.common.LinuxDoLog.warn("Private JCEF cleanup failed: ${NetworkTrace.errorType(it)}")
+        ApplicationManager.getApplication().executeOnPooledThread {
+            runCatching {
+                val process = ownedProcess ?: nativeProcess()
+                call(app, "dispose")
+                if (process == null || !process.isAlive) termination.complete(null)
+                else process.onExit().thenRun { termination.complete(null) }
+            }.onFailure {
+                com.lgguan.linuxdo.plugin.common.LinuxDoLog.warn("Private JCEF cleanup failed: ${NetworkTrace.errorType(it)}")
+            }
         }
     }
 
     private fun forceNativeDisposal() {
         runCatching {
-            val process = nativeProcess()
+            val process = ownedProcess ?: nativeProcess()
             if (process != null && process.isAlive) {
                 process.destroy()
                 if (!process.waitFor(1, TimeUnit.SECONDS)) process.destroyForcibly().waitFor(1, TimeUnit.SECONDS)
@@ -301,21 +353,41 @@ class IsolatedCefRuntime private constructor(val config: LinuxDoNetworkConfig) :
 
     companion object {
         @Volatile private var current: IsolatedCefRuntime? = null
-        fun currentOrNull(): IsolatedCefRuntime? = current?.takeUnless { it.disposed }
+        fun currentOrNull(): IsolatedCefRuntime? = current?.takeIf { it.isUsable }
         fun prepare(onReady: (Result<IsolatedCefRuntime>) -> Unit) {
             ApplicationManager.getApplication().executeOnPooledThread {
-                val result = runCatching { get() }
+                val result = runCatching { get().also { it.ready.get(27, TimeUnit.SECONDS); check(it.isUsable) { "正文浏览器连接已断开" } } }
                 ApplicationManager.getApplication().invokeLater({ onReady(result) }, com.intellij.openapi.application.ModalityState.any())
+            }
+        }
+        /** Client creation performs RPC; keep it off Swing and bound the visible startup wait. */
+        fun prepareBrowser(onReady: (Result<LinuxDoBrowser>) -> Unit) {
+            val pending = CompletableFuture<LinuxDoBrowser>()
+            pending.orTimeout(30, TimeUnit.SECONDS).whenComplete { browser, error ->
+                val result = if (error == null) Result.success(browser) else Result.failure(error)
+                ApplicationManager.getApplication().invokeLater({ onReady(result) }, com.intellij.openapi.application.ModalityState.any())
+            }
+            ApplicationManager.getApplication().executeOnPooledThread {
+                try {
+                    val runtime = get()
+                    runtime.ready.get(27, TimeUnit.SECONDS)
+                    val browser = LinuxDoBrowser(runtime)
+                    if (!pending.complete(browser)) Disposer.dispose(browser)
+                } catch (error: Throwable) { pending.completeExceptionally(error) }
             }
         }
         @Synchronized fun get(): IsolatedCefRuntime {
             val config = LinuxDoSettingsState.getInstance().toNetworkConfig().copy(revision = 0)
+            current?.takeIf { !it.isUsable && !it.disposed }?.let { Disposer.dispose(it) }
             currentOrNull()?.let {
                 if (it.config.runtimeKey() == config.runtimeKey()) return it
-                it.dispose()
+                Disposer.dispose(it)
             }
             // Reusing a profile before its process exits makes CEF silently select a temporary profile.
-            current?.takeIf { it.disposed && it.config.runtimeKey() == config.runtimeKey() }?.awaitTermination()
+            current?.takeIf { it.disposed }?.let {
+                if (it.config.runtimeKey() == config.runtimeKey()) it.awaitTermination()
+                Disposer.dispose(it)
+            }
             return IsolatedCefRuntime(config).also { runtime ->
                 current = runtime
                 Disposer.register(ApplicationManager.getApplication().getService(LinuxDoPluginLifetime::class.java), runtime)
@@ -360,8 +432,12 @@ class IsolatedCefRuntime private constructor(val config: LinuxDoNetworkConfig) :
             val transport = cls("com.jetbrains.cef.remote.ThriftTransport")
             cefApp.getMethod("setIsRemoteEnabled", Boolean::class.javaPrimitiveType)
             cefApp.getMethod("getInstance", Array<String>::class.java, cefSettings, transport, File::class.java)
+            cefApp.getMethod("setDisconnectionCallback", Runnable::class.java)
             cefSettings.getField("chrome_policy_id")
             transport.getConstructor(String::class.java)
+            transport.getConstructor(Int::class.javaPrimitiveType)
+            transport.getMethod("findFreePort")
+            transport.getMethod("findFreePort", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Set::class.java)
             transport.getMethod("getServerPipe", String::class.java)
             cls("com.jetbrains.cef.JCefAppConfig").apply {
                 getMethod("getInstance", String::class.java, Boolean::class.javaPrimitiveType)
@@ -374,6 +450,7 @@ class IsolatedCefRuntime private constructor(val config: LinuxDoNetworkConfig) :
             cls("com.jetbrains.cef.SharedMemory\$WithRaster").getMethod("wrapRaster")
             cls("com.jetbrains.cef.remote.ServerStarter").getDeclaredField("ourNativeServerProcesses")
             cls("org.cef.browser.CefBrowser").getMethod("notifyScreenInfoChanged")
+            cls("org.cef.browser.CefBrowser").getMethod("invalidate")
         }
     }
 }

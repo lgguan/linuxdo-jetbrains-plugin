@@ -30,13 +30,13 @@ python tools/smoke.py private --ide-home '/path/to/IDE' --network
 python tools/smoke.py host --ide-home '/path/to/IDE'
 
 # 指定安装包；可加 --native 检查原生浏览器及公开网络
-python tools/smoke.py host --ide-home '/path/to/IDE' --plugin-zip build/distributions/linuxdo-jetbrains-plugin-1.0.0.zip
+python tools/smoke.py host --ide-home '/path/to/IDE' --plugin-zip build/distributions/linuxdo-jetbrains-plugin-1.0.1.zip
 
 # 真实 IDE 桌面交互：回复窗口与正文阅读器，不使用真实账号
-python tools/smoke.py ui --ide-home '/path/to/IDE' --plugin-zip build/distributions/linuxdo-jetbrains-plugin-1.0.0.zip
+python tools/smoke.py ui --ide-home '/path/to/IDE' --plugin-zip build/distributions/linuxdo-jetbrains-plugin-1.0.1.zip
 
 # 当前生产界面的宣传截图：使用示例话题与内存草稿，不发送真实帖子
-python tools/smoke.py ui --ide-home '/path/to/IDE' --plugin-zip build/distributions/linuxdo-jetbrains-plugin-1.0.0.zip --showcase
+python tools/smoke.py ui --ide-home '/path/to/IDE' --plugin-zip build/distributions/linuxdo-jetbrains-plugin-1.0.1.zip --showcase
 ```
 
 Windows 示例：`python tools/smoke.py private --ide-home 'C:\path\to\WebStorm'`。默认离线构建，依赖尚未缓存时加 `--online`。联网模式默认使用 LinuxDo DoH，可通过 `--doh-url` 指定测试地址。

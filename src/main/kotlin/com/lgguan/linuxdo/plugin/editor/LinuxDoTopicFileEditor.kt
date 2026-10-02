@@ -27,7 +27,7 @@ class LinuxDoTopicFileEditor(
 
     override fun getComponent(): JComponent = viewerPanel
 
-    override fun getPreferredFocusedComponent(): JComponent = viewerPanel
+    override fun getPreferredFocusedComponent(): JComponent = viewerPanel.preferredFocusedComponent()
 
     override fun getName(): String = LinuxDoTopicVirtualFile.topicTitle(topicFile)
 

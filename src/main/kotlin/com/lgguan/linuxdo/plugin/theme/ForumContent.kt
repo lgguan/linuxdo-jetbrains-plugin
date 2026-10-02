@@ -15,19 +15,15 @@ internal object ForumContent {
         var counter = 0
         if (prefix.isNotBlank()) {
             val anchors = mutableMapOf<String, String>()
-            body.select("h1[id],h2[id],h3[id],h4[id],h5[id],h6[id],a[name]").forEach { element ->
-                val attr = if (element.hasAttr("id")) "id" else "name"
+            var anchorCount = 0
+            body.select("h1,h2,h3,h4,h5,h6,a[name]").forEach { element ->
+                val attr = if (element.tagName() != "a" || element.hasAttr("id")) "id" else "name"
                 val old = element.attr(attr)
-                val scoped = "content-$prefix-${anchors.size}"
-                anchors[old] = scoped; element.attr(attr, scoped)
+                val scoped = "content-$prefix-${anchorCount++}"
+                if (old.isNotBlank()) anchors[old] = scoped
+                element.attr(attr, scoped)
             }
             body.select("a[href^=#]").forEach { link -> anchors[link.attr("href").removePrefix("#")]?.let { link.attr("href", "#$it") } }
-        }
-        body.select(".poll,.math,.mermaid,pre:has(code.language-mermaid),pre:has(code.lang-mermaid)").forEach { node ->
-            node.after(Element("p").addClass("forum-unsupported").apply {
-                text("公式、图表或投票请在网页查看完整效果。")
-                if (postUrl != null) appendElement("a").attr("href", postUrl).text("打开原帖")
-            })
         }
         body.select(".lightbox .meta, .lightbox-wrapper .meta").remove()
         body.select("table").toList().forEach { table ->
@@ -40,10 +36,18 @@ internal object ForumContent {
             if (title.select(".quote-controls").isEmpty()) title.prependElement("span").addClass("quote-controls").text("↪ #$floor ")
             if (topic != null) title.select(".quote-controls").attr("title", "查看引用：话题 $topic，第 $floor 楼")
         }
+        body.select(".poll").forEach { node ->
+            if (postUrl == null) node.after(Element("p").addClass("forum-unsupported").text("投票预览；发布后的选项与权限由论坛提供。"))
+        }
         // Do not fold avatars, emojis, badges, or a onebox's source icon.
         body.select("img").toList().forEach { image ->
             val src = image.attr("src")
             if (src.isBlank() || inline(image)) return@forEach
+            image.attr("loading", "lazy").attr("decoding", "async")
+            val width = image.attr("width").toIntOrNull()
+            val height = image.attr("height").toIntOrNull()
+            if (width != null && height != null && width in 1..20000 && height in 1..20000)
+                image.attr("style", "aspect-ratio:$width/$height;max-width:100%;height:auto")
             val link = image.parent()?.takeIf { it.tagName() == "a" }
             val imageLink = link?.takeIf { it.hasClass("lightbox") || it.attr("href").matches(Regex("(?i).*(?:/uploads/|\\.(?:png|jpe?g|gif|webp|bmp|svg)(?:\\?.*)?$).*")) }
             val original = image.attr("data-orig-src").ifBlank { imageLink?.attr("href").orEmpty() }.ifBlank { src }

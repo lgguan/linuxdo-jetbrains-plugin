@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "2.0.21"
@@ -5,7 +7,7 @@ plugins {
 }
 
 group = "com.lgguan.linuxdo"
-version = "1.0.0"
+version = "1.0.1"
 
 repositories {
     mavenCentral()
@@ -44,6 +46,23 @@ kotlin {
 }
 
 tasks {
+    val verifyReaderAssets by registering {
+        val vendor = layout.projectDirectory.dir("src/main/resources/web/vendor")
+        inputs.dir(vendor)
+        doLast {
+            val manifest = groovy.json.JsonSlurper().parse(vendor.file("manifest.json").asFile) as List<*>
+            manifest.forEach { value ->
+                val item = value as Map<*, *>
+                listOf("file" to "sha256", "license" to "license_sha256").forEach { (fileKey, hashKey) ->
+                    val resource = vendor.file(item[fileKey] as String).asFile
+                    val digest = MessageDigest.getInstance("SHA-256").digest(resource.readBytes())
+                        .joinToString("") { "%02x".format(it) }
+                    check(digest == item[hashKey]) { "Reader asset checksum mismatch: ${resource.name}" }
+                }
+            }
+        }
+    }
+    processResources { dependsOn(verifyReaderAssets) }
     runPluginVerifier {
         // Real binary/API verification, separate from verifyPlugin's ZIP/descriptor checks.
         val localIde = providers.gradleProperty("verifierIdePath")

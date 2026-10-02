@@ -26,7 +26,7 @@ public class PaginationSmoke {
   public static void run() throws Exception {
     PrintWriter out = new PrintWriter(System.out, true);
     {
-      LinuxDoBrowser b=new LinuxDoBrowser(IsolatedCefRuntime.Companion.get());
+      LinuxDoBrowser b=new LinuxDoBrowser(IsolatedCefRuntime.Companion.get(), false);
       try {
         String source;
         try (InputStream input = DocSource()) { source = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8); }
@@ -78,6 +78,8 @@ public class PaginationSmoke {
         eval(b,"linuxDoPagination.refreshed('test',[],true)");
         check(b,out,"REFRESH_FAILURE_RETAINS_POSTS","document.querySelectorAll('.post-entry').length===80 && document.querySelector('[role=status]').textContent.includes('失败')");
         eval(b,"document.querySelector('#refresh-posts-bottom').click();dispatchEvent(new WheelEvent('wheel'));window.scrollTo(0,document.body.scrollHeight);dispatchEvent(new Event('scroll'));window.lastAnchor=document.querySelector('[data-post-id=\"160\"]');window.lastTop=lastAnchor.getBoundingClientRect().top;linuxDoPagination.refreshed('test',Array.from({length:185},(_,i)=>String(i+1)),false)");
+        check(b,out,"NEW_REPLIES_WAIT_FOR_USER","calls.length===5 && document.querySelector('[role=status]').textContent.includes('发现 25 条新回复') && Math.abs(lastAnchor.getBoundingClientRect().top-lastTop)<2");
+        eval(b,"document.querySelector('#load-posts-after').click()");
         await(b,"calls.length===6");
         check(b,out,"NEW_REPLY_BATCH_BOUNDED","calls[5].direction==='after' && calls[5].ids[0]==='161' && calls[5].ids.length===20");
         check(b,out,"REFRESH_ANCHOR_STABLE","Math.abs(lastAnchor.getBoundingClientRect().top-lastTop)<2");
