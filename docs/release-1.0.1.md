@@ -15,6 +15,7 @@
 - 实际 Windows IDEA `IU-262.10968.63`：135 项检查全部通过。覆盖连续缩放无需滚动重绘、断线重试、读取位置恢复、实时主题、登录刷新合并及自动已读。
 - Plugin Verifier：`Compatible`；`buildPlugin`、`verifyPlugin` 通过。
 - 全新源码目录构建通过，ZIP 与工作区安装包 SHA-256 完全一致。
+- 固定打包依赖的 Git 字节表示，避免 Windows 检出时自动转换换行导致原始 SHA-256 校验失败。
 - 本轮交互写入测试使用模拟传输，没有向真实论坛提交帖子操作。
 
 本地报告位于 `build/test-results/test/`、`build/host-smoke/c32c5df5-a270-4ede-ba28-d21b4066711e/`、`build/reports/pluginVerifier/` 和 `build/release-check/dc4eece8-2108-4478-85e7-b634fa1b5308/`，不作为公开附件上传。

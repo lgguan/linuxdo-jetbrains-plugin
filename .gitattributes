@@ -1,4 +1,7 @@
 * text=auto
+
+# Preserve the exact upstream bytes used by the bundled asset checksum manifest.
+src/main/resources/web/vendor/** -text
 gradlew text eol=lf
 *.sh text eol=lf
 *.bat text eol=crlf
