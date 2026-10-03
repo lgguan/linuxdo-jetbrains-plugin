@@ -52,7 +52,7 @@ Windows 示例：`python tools/smoke.py private --ide-home 'C:\path\to\WebStorm'
 
 独立 JCEF 检查需要桌面会话，Linux CI 可使用 `xvfb-run`。结果位于 `build/portable-smoke/`，成功标记为 `PORTABLE_NATIVE_PASS=true`；联网检查需各项断言通过且进程正常退出。安装包检查结果位于 `build/host-smoke/`；商业 IDE 的许可可能限制完整启动。模拟 Application 的检查不能替代安装包类加载验证，真实账号及桌面交互仍需按[跨平台指南](../docs/cross-platform.md)验收。
 
-第三期可用 `ui --editor-only` 验证三种编辑窗口的 Markdown 辅助。现有回归可分为 `--composer-only`（浏览与编辑器）和 `--reader-only`（正文与浏览器），分别运行隔离 IDE，保留原断言并减少不同窗口初始化的焦点干扰。综合探针仍保留默认入口；本期同进程初始焦点失败记录见[编辑辅助验收](../docs/markdown-editor-verification.md)。
+第三期可用 `ui --editor-only` 验证三种编辑窗口的 Markdown 辅助；Windows 加 `--system-ime`，使用已安装的中文输入法和实际按键验证候选确认不会触发格式操作或提交。现有回归可分为 `--composer-only`（浏览与编辑器）和 `--reader-only`（正文与浏览器），分别运行隔离 IDE，保留原断言并减少不同窗口初始化的焦点干扰。综合探针仍保留默认入口；本期同进程初始焦点失败记录见[编辑辅助验收](../docs/markdown-editor-verification.md)。
 
 `ui` 使用已打包插件中的话题列表、高级搜索、创建与回复窗口、定时器和正文阅读器，输出 `IDE_UI_PASS=true`、断言报告与截图；自动建立空配置，避免首次启动导入个人设置。覆盖标签组合请求、分页、键盘选择与整块鼠标点击、菜单内移除、窄窗口换行、提示状态、主题与缩放。草稿延迟、断网、409 和发送均由内存传输模拟，并记录 EDT 响应时间。工具不打入插件包。
 

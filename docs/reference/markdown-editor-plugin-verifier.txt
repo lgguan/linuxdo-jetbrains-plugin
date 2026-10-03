@@ -2,14 +2,11 @@
 > Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
 > Task :patchPluginXml UP-TO-DATE
 > Task :verifyPluginConfiguration
+> Task :compileKotlin UP-TO-DATE
+> Task :compileJava UP-TO-DATE
 > Task :verifyBoostAssets
 > Task :verifyReaderAssets
 > Task :processResources UP-TO-DATE
-> Task :downloadAndroidStudioProductReleasesXml
-> Task :downloadIdeaProductReleasesXml
-> Task :listProductsReleases SKIPPED
-> Task :compileKotlin
-> Task :compileJava UP-TO-DATE
 > Task :classes UP-TO-DATE
 > Task :instrumentCode UP-TO-DATE
 > Task :jar UP-TO-DATE
@@ -20,16 +17,19 @@
 > Task :buildSearchableOptions SKIPPED
 > Task :jarSearchableOptions SKIPPED
 > Task :buildPlugin UP-TO-DATE
+> Task :downloadAndroidStudioProductReleasesXml
+> Task :downloadIdeaProductReleasesXml
+> Task :listProductsReleases SKIPPED
 > Task :verifyPlugin
 
 > Task :runPluginVerifier
 Starting the IntelliJ Plugin Verifier 1.410
-2026-10-03T21:55:34 [main] INFO  c.j.p.options.OptionsParser - The verification directory D:\developer\workspace\IdeaProjects\linuxdo-jetbrains-plugin\build\reports\pluginVerifier is being deleted because it is not empty.
+2026-10-03T22:45:10 [main] INFO  c.j.p.options.OptionsParser - The verification directory D:\developer\workspace\IdeaProjects\linuxdo-jetbrains-plugin\build\reports\pluginVerifier is being deleted because it is not empty.
 Verification reports directory: D:\developer\workspace\IdeaProjects\linuxdo-jetbrains-plugin\build\reports\pluginVerifier
-2026-10-03T21:56:20 [main] INFO  verification - Reading IDE C:\Users\lgguan\AppData\Local\Programs\IntelliJ IDEA Ultimate
-2026-10-03T21:56:20 [main] INFO  c.j.p.options.OptionsParser - Reading IDE from C:\Users\lgguan\AppData\Local\Programs\IntelliJ IDEA Ultimate
-2026-10-03T21:56:20 [main] INFO  c.j.p.options.OptionsParser - Using Java runtime from C:\Users\lgguan\AppData\Local\Programs\IntelliJ IDEA Ultimate\jbr
-2026-10-03T21:56:20 [main] WARN  c.j.p.s.i.r.ValidatingLayoutComponentsProvider - Layout component 'intellij.android.gradle.declarative.lang' has some nonexistent 'classPath' elements: 'plugins\android-gradle-declarative-lang-ide\lib\modules\intellij.android.gradle.declarative.lang.jar'
+2026-10-03T22:45:57 [main] INFO  verification - Reading IDE C:\Users\lgguan\AppData\Local\Programs\IntelliJ IDEA Ultimate
+2026-10-03T22:45:57 [main] INFO  c.j.p.options.OptionsParser - Reading IDE from C:\Users\lgguan\AppData\Local\Programs\IntelliJ IDEA Ultimate
+2026-10-03T22:45:57 [main] INFO  c.j.p.options.OptionsParser - Using Java runtime from C:\Users\lgguan\AppData\Local\Programs\IntelliJ IDEA Ultimate\jbr
+2026-10-03T22:45:57 [main] WARN  c.j.p.s.i.r.ValidatingLayoutComponentsProvider - Layout component 'intellij.android.gradle.declarative.lang' has some nonexistent 'classPath' elements: 'plugins\android-gradle-declarative-lang-ide\lib\modules\intellij.android.gradle.declarative.lang.jar'
 Layout component 'intellij.android.gradle.declarative.lang.flags' has some nonexistent 'classPath' elements: 'plugins\android-gradle-declarative-lang-ide\lib\modules\intellij.android.gradle.declarative.lang.flags.jar'
 Layout component 'intellij.android.gradle.declarative.lang.sync' has some nonexistent 'classPath' elements: 'plugins\android-gradle-declarative-lang-ide\lib\modules\intellij.android.gradle.declarative.lang.sync.jar'
 Layout component 'intellij.clouds.docker.agent' has some nonexistent 'classPath' elements: 'plugins\clouds-docker-impl\lib\modules\intellij.clouds.docker.agent.jar'
@@ -112,24 +112,24 @@ Layout component 'intellij.toml.core' has some nonexistent 'classPath' elements:
 Layout component 'intellij.vcs.github' has some nonexistent 'classPath' elements: 'plugins\vcs-github\lib\modules\intellij.vcs.github.jar'
 Layout component 'intellij.vcs.gitlab' has some nonexistent 'classPath' elements: 'plugins\vcs-gitlab\lib\modules\intellij.vcs.gitlab.jar'
 Layout component 'intellij.yaml' has some nonexistent 'classPath' elements: 'plugins\yaml\lib\modules\intellij.yaml.jar'
-2026-10-03T21:56:21 [main] INFO  verification - Reading plugin to check from D:\developer\workspace\IdeaProjects\linuxdo-jetbrains-plugin\build\distributions\linuxdo-jetbrains-plugin-1.0.2.zip
-2026-10-03T21:56:22 [main] INFO  verification - Task check-plugin parameters:
+2026-10-03T22:45:58 [main] INFO  verification - Reading plugin to check from D:\developer\workspace\IdeaProjects\linuxdo-jetbrains-plugin\build\distributions\linuxdo-jetbrains-plugin-1.0.2.zip
+2026-10-03T22:45:59 [main] INFO  verification - Task check-plugin parameters:
 Scheduled verifications (1):
 com.lgguan.linuxdo.plugin:1.0.2 against IU-262.10968.63
 
-2026-10-03T21:56:48 [main] INFO  verification - Finished 1 of 1 verifications (in 25.3 s): IU-262.10968.63 against com.lgguan.linuxdo.plugin:1.0.2: Compatible
-2026-10-03T21:56:48 [main] INFO  c.j.p.PluginVerifierMain - Started printing results (CheckPluginResultPrinter)
+2026-10-03T22:46:32 [main] INFO  verification - Finished 1 of 1 verifications (in 33.4 s): IU-262.10968.63 against com.lgguan.linuxdo.plugin:1.0.2: Compatible
+2026-10-03T22:46:32 [main] INFO  c.j.p.PluginVerifierMain - Started printing results (CheckPluginResultPrinter)
 Plugin com.lgguan.linuxdo.plugin:1.0.2 against IU-262.10968.63: Compatible
 Dynamic Plugin Eligibility:
     Plugin can probably be enabled or disabled without IDE restart
 
-2026-10-03T21:56:48 [main] INFO  c.j.p.PluginVerifierMain - Finished printing results in 82ms
-2026-10-03T21:56:48 [main] INFO  verification - Total time spent downloading plugins and their dependencies: 0 ms
-2026-10-03T21:56:48 [main] INFO  verification - Total amount of plugins and dependencies downloaded: 0 B
-2026-10-03T21:56:48 [main] INFO  verification - Total amount of space used for plugins and dependencies: 0 B
-2026-10-03T21:56:48 [main] INFO  verification - PluginDetailsCache statistics: hits=127, misses=36, failures=0, evictions=0, total=163, hit-rate=77.9%
-2026-10-03T21:56:48 [main] INFO  verification - Verification reports for com.lgguan.linuxdo.plugin:1.0.2 saved to D:\developer\workspace\IdeaProjects\linuxdo-jetbrains-plugin\build\reports\pluginVerifier\IU-262.10968.63
-2026-10-03T21:56:48 [main] INFO  verification - Total time spent in plugin verification: 27 s 524 ms
+2026-10-03T22:46:32 [main] INFO  c.j.p.PluginVerifierMain - Finished printing results in 78ms
+2026-10-03T22:46:32 [main] INFO  verification - Total time spent downloading plugins and their dependencies: 0 ms
+2026-10-03T22:46:32 [main] INFO  verification - Total amount of plugins and dependencies downloaded: 0 B
+2026-10-03T22:46:32 [main] INFO  verification - Total amount of space used for plugins and dependencies: 0 B
+2026-10-03T22:46:32 [main] INFO  verification - PluginDetailsCache statistics: hits=127, misses=36, failures=0, evictions=0, total=163, hit-rate=77.9%
+2026-10-03T22:46:32 [main] INFO  verification - Verification reports for com.lgguan.linuxdo.plugin:1.0.2 saved to D:\developer\workspace\IdeaProjects\linuxdo-jetbrains-plugin\build\reports\pluginVerifier\IU-262.10968.63
+2026-10-03T22:46:32 [main] INFO  verification - Total time spent in plugin verification: 35 s 386 ms
 
 [Incubating] Problems report is available at: file:///D:/developer/workspace/IdeaProjects/linuxdo-jetbrains-plugin/build/reports/problems/problems-report.html
 
@@ -139,5 +139,5 @@ You can use '--warning-mode all' to show the individual deprecation warnings and
 
 For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
 
-BUILD SUCCESSFUL in 1m 29s
-18 actionable tasks: 9 executed, 9 up-to-date
+BUILD SUCCESSFUL in 1m 28s
+18 actionable tasks: 8 executed, 10 up-to-date

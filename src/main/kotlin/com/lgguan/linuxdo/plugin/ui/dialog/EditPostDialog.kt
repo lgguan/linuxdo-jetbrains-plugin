@@ -39,6 +39,8 @@ internal class EditPostDialog(
     init {
         title = "编辑帖子 #${initial.postNumber}"
         setOKButtonText("保存编辑")
+        // Enter belongs to the editor and native IME; saving requires activating the button.
+        okAction.putValue(DEFAULT_ACTION, null)
         init()
         editor.resetUndo()
         ComposerAppearance.followTheme(disposable, contentPanel, text, editorPanel) { preview.refreshTheme() }

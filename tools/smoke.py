@@ -143,6 +143,8 @@ def host(args):
         vm_args.append("-Dlinuxdo.reader.only=true")
     if getattr(args, "composer_only", False):
         vm_args.append("-Dlinuxdo.composer.only=true")
+    if getattr(args, "system_ime", False):
+        vm_args.append("-Dlinuxdo.editor.system.ime=true")
     if getattr(args, "draft_bridge", None):
         vm_args.append(f"-Dlinuxdo.draft.bridge={Path(args.draft_bridge).resolve()}")
     if args.native:
@@ -177,6 +179,7 @@ def main():
             sub.add_argument("--output-base", help="Short directory for isolated IDE runs, avoiding Windows path limits")
             sub.add_argument("--native", action="store_true")
         if mode == "ui":
+            sub.add_argument("--system-ime", action="store_true", help="Also verify installed Chinese input method with physical candidate-confirmation keys")
             sub.add_argument("--composer-only", action="store_true", help="Run existing browsing/composer assertions separately from reader focus checks")
             sub.add_argument("--editor-only", action="store_true", help="Exercise Markdown helpers in three production dialogs and two IDEA projects using memory HTTP")
             sub.add_argument("--personal-only", action="store_true", help="Exercise personal content in two real IDEA project frames with memory-only HTTP")

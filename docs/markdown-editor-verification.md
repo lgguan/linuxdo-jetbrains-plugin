@@ -24,7 +24,7 @@
 | 检查 | 结果与范围 |
 | --- | --- |
 | 全量测试 | 420 项通过，0 失败、0 错误、0 跳过；含本期 50 项纯文本测试与模拟传输 |
-| 新增编辑辅助原生验收 | 两个真实 IDEA 项目窗口，三类生产编辑器，70 项通过；模拟写入 3 次，真实写入 0 |
+| 新增编辑辅助原生验收 | 两个真实 IDEA 项目窗口，三类生产编辑器，91 项通过；模拟写入 3 次，真实写入 0 |
 | 原有浏览／编辑器回归 | 独立 IDEA 进程 130 项通过，涵盖上传、草稿冲突、发布结果不明及账号切换 |
 | 原有正文回归 | 独立 IDEA 进程 77 项通过，涵盖导航、通知跳转、读取计时、缩放及浏览器恢复 |
 | 个人入口原生回归 | 两个真实项目窗口 35 项通过，真实及模拟写入均为 0 |
@@ -37,7 +37,7 @@
 
 `MarkdownEditorIdeAcceptance.java` 在两个真实 Windows IDEA 项目窗口中运行三个生产编辑器，使用实际键盘检查 Tab 缩进和焦点导航，验证对话框、撤销、主题、窄窗口与模拟保存。HTTP 拦截器在进入网络前返回内存响应；所有模拟写入只存在于进程内，不调用真实论坛。
 
-输入法检查向真实 IDEA 编辑组件发送组合输入事件，验证候选阶段的辅助门禁；没有自动操作系统输入法候选窗口。macOS/Linux 原生验收仍待后续执行。
+输入法检查同时覆盖合成组合事件及 Windows 已安装的中文输入法：实际输入候选内容，按 Enter 确认和按 Tab，验证不会误续行、缩进或提交，三个窗口均保持打开。候选截图：[新话题](images/editor-helper-topic-ime.png)、[回复](images/editor-helper-reply-ime.png)、[编辑帖子](images/editor-helper-edit-ime.png)。截图期间不改变焦点。编辑帖子取消默认 Enter 保存，只有主动激活“保存编辑”按钮才提交。macOS/Linux 原生验收仍待后续执行。
 
 示例界面：[新话题](images/editor-helper-topic.png)、[回复](images/editor-helper-reply.png)、[编辑帖子](images/editor-helper-edit.png)。截图仅使用内存示例内容。
 
@@ -52,7 +52,7 @@
 ```powershell
 ./gradlew.bat test -PdesktopTests=true buildPlugin verifyPlugin --offline
 ./gradlew.bat runPluginVerifier '-PverifierIdePath=C:/Users/lgguan/AppData/Local/Programs/IntelliJ IDEA Ultimate' -PverifierOffline=true --offline
-python tools/smoke.py ui --ide-home 'C:/Users/lgguan/AppData/Local/Programs/IntelliJ IDEA Ultimate' --plugin-zip build/distributions/linuxdo-jetbrains-plugin-1.0.2.zip --editor-only --output-base D:/ld-editor-smoke
+python tools/smoke.py ui --ide-home 'C:/Users/lgguan/AppData/Local/Programs/IntelliJ IDEA Ultimate' --plugin-zip build/distributions/linuxdo-jetbrains-plugin-1.0.2.zip --editor-only --system-ime --output-base D:/ld-editor-smoke
 # 既有回归分两个隔离进程执行；分别沿用原浏览／编辑和正文断言
 python tools/smoke.py ui --ide-home 'C:/Users/lgguan/AppData/Local/Programs/IntelliJ IDEA Ultimate' --plugin-zip build/distributions/linuxdo-jetbrains-plugin-1.0.2.zip --composer-only
 python tools/smoke.py ui --ide-home 'C:/Users/lgguan/AppData/Local/Programs/IntelliJ IDEA Ultimate' --plugin-zip build/distributions/linuxdo-jetbrains-plugin-1.0.2.zip --reader-only

@@ -219,7 +219,8 @@ public final class MarkdownEditorIdeAcceptance implements ApplicationStarter {
 
   private static void physicalKeyboard(Object dialog,String label)throws Exception {
     JTextArea text=text(dialog);Window window=((com.intellij.openapi.ui.DialogWrapper)dialog).getWindow();
-    edt(()->{window.setAlwaysOnTop(true);window.toFront();window.requestFocus();text.setText("- item");text.setCaretPosition(6);text.requestFocusInWindow();return null;});
+    edt(()->{window.setAlwaysOnTop(true);window.toFront();window.requestFocus();text.getInputContext().endComposition();text.getInputContext().selectInputMethod(Locale.US);text.enableInputMethods(false);text.setText("- item");text.setCaretPosition(6);text.requestFocusInWindow();return null;});
+    click(text);edt(()->{text.setCaretPosition(6);return null;});
     await("actual editor focus",text::hasFocus);Robot robot=new Robot();robot.setAutoDelay(60);
     robot.keyPress(java.awt.event.KeyEvent.VK_TAB);robot.keyRelease(java.awt.event.KeyEvent.VK_TAB);robot.waitForIdle();
     check(label+"_PHYSICAL_TAB_INDENT",edt(()->text.getText().equals("  - item")&&text.hasFocus()));
@@ -228,6 +229,7 @@ public final class MarkdownEditorIdeAcceptance implements ApplicationStarter {
     edt(()->{text.setText("plain");window.toFront();window.requestFocus();return null;});click(text);await("ordinary editor focus",text::hasFocus);
     robot.keyPress(java.awt.event.KeyEvent.VK_TAB);robot.keyRelease(java.awt.event.KeyEvent.VK_TAB);robot.waitForIdle();await("plain tab leaves editor",()->!text.hasFocus());
     check(label+"_ORDINARY_TAB_NAVIGATION",edt(()->text.getText().equals("plain")));
+    edt(()->{text.enableInputMethods(true);return null;});
   }
   private static void linkEditCheck(Object dialog,String label)throws Exception {
     JTextArea text=text(dialog);edt(()->{text.setText("[label](https://example.com/old)");text.setCaretPosition(3);return null;});
@@ -236,6 +238,47 @@ public final class MarkdownEditorIdeAcceptance implements ApplicationStarter {
     check(label+"_LINK_BACKFILLED",edt(()->components(window).stream().anyMatch(c->c instanceof JTextField&&"composer-link-url".equals(c.getName())&&((JTextField)c).getText().equals("https://example.com/old"))));
     edt(()->{for(Component c:components(window))if(c instanceof JTextField f&&"composer-link-url".equals(c.getName()))f.setText("https://example.com/new");components(window).stream().filter(c->c instanceof JButton&&"应用".equals(((JButton)c).getText())).map(c->(JButton)c).findFirst().orElseThrow().doClick();return null;});
     await("existing link applied",()->!window.isShowing());check(label+"_LINK_REPLACED_WITHOUT_NESTING",edt(()->text.getText().equals("[label](<https://example.com/new>)")));
+  }
+  private static void systemIme(Object dialog,String label)throws Exception {
+    JTextArea text=text(dialog);Window window=((com.intellij.openapi.ui.DialogWrapper)dialog).getWindow();
+    java.awt.im.InputContext context=edt(text::getInputContext);Locale previous=edt(context::getLocale);
+    AtomicInteger events=new AtomicInteger();int writesBefore=fixture.writes.get();
+    java.awt.event.InputMethodListener observer=new java.awt.event.InputMethodListener(){
+      public void inputMethodTextChanged(java.awt.event.InputMethodEvent e){events.incrementAndGet();}
+      public void caretPositionChanged(java.awt.event.InputMethodEvent e){}
+    };
+    edt(()->{text.addInputMethodListener(observer);window.setAlwaysOnTop(true);window.toFront();text.setText("- ");text.setCaretPosition(2);text.requestFocusInWindow();return null;});
+    await("system IME editor focus",text::hasFocus);Robot robot=new Robot();robot.setAutoDelay(100);
+    try {
+      check(label+"_SYSTEM_CHINESE_IME_SELECTED",edt(()->context.selectInputMethod(Locale.SIMPLIFIED_CHINESE)));
+      for(int attempt=0;attempt<2;attempt++){
+        if(attempt>0){edt(()->{context.endComposition();text.setText("- ");text.setCaretPosition(2);return null;});robot.keyPress(java.awt.event.KeyEvent.VK_CONTROL);robot.keyPress(java.awt.event.KeyEvent.VK_SPACE);robot.keyRelease(java.awt.event.KeyEvent.VK_SPACE);robot.keyRelease(java.awt.event.KeyEvent.VK_CONTROL);}
+        for(int code:new int[]{java.awt.event.KeyEvent.VK_N,java.awt.event.KeyEvent.VK_I,java.awt.event.KeyEvent.VK_H,java.awt.event.KeyEvent.VK_A,java.awt.event.KeyEvent.VK_O}){robot.keyPress(code);robot.keyRelease(code);}
+        robot.waitForIdle();Thread.sleep(300);
+        if(edt(()->(Boolean)field(support(dialog),"composing")))break;
+      }
+      check(label+"_SYSTEM_CANDIDATE_COMPOSITION",events.get()>0&&edt(()->(Boolean)field(support(dialog),"composing")));
+      Rectangle bounds=edt(window::getBounds);ImageIO.write(robot.createScreenCapture(bounds),"png",output.resolve("editor-"+label.toLowerCase()+"-ime.png").toFile());
+      robot.keyPress(java.awt.event.KeyEvent.VK_ENTER);robot.keyRelease(java.awt.event.KeyEvent.VK_ENTER);robot.waitForIdle();
+      await("system candidate confirmed",()->!(Boolean)field(support(dialog),"composing"));
+      check(label+"_SYSTEM_ENTER_NO_LIST_CONTINUATION",edt(()->text.getText().startsWith("- ")&&!text.getText().contains("\n")&&text.getText().length()>2));
+      check(label+"_SYSTEM_ENTER_NO_SUBMIT",edt(window::isShowing)&&fixture.writes.get()==writesBefore);
+      // Let the native WM_IME_ENDCOMPOSITION finish before starting a second candidate sequence.
+      Thread.sleep(300);
+      for(int attempt=0;attempt<2;attempt++){
+        edt(()->{context.endComposition();window.toFront();text.setText("- ");text.setCaretPosition(2);text.requestFocusInWindow();return null;});
+        await("system IME focus before Tab",text::hasFocus);
+        if(attempt>0){robot.keyPress(java.awt.event.KeyEvent.VK_CONTROL);robot.keyPress(java.awt.event.KeyEvent.VK_SPACE);robot.keyRelease(java.awt.event.KeyEvent.VK_SPACE);robot.keyRelease(java.awt.event.KeyEvent.VK_CONTROL);}
+        for(int code:new int[]{java.awt.event.KeyEvent.VK_N,java.awt.event.KeyEvent.VK_I,java.awt.event.KeyEvent.VK_H,java.awt.event.KeyEvent.VK_A,java.awt.event.KeyEvent.VK_O}){robot.keyPress(code);robot.keyRelease(code);}robot.waitForIdle();Thread.sleep(300);
+        if(edt(()->(Boolean)field(support(dialog),"composing")))break;
+      }
+      check(label+"_SYSTEM_CANDIDATE_BEFORE_TAB",edt(()->(Boolean)field(support(dialog),"composing")));
+      robot.keyPress(java.awt.event.KeyEvent.VK_TAB);robot.keyRelease(java.awt.event.KeyEvent.VK_TAB);robot.waitForIdle();
+      check(label+"_SYSTEM_TAB_NO_LIST_INDENT",edt(()->text.getText().startsWith("- ")));
+      check(label+"_SYSTEM_TAB_NO_SUBMIT",edt(window::isShowing)&&fixture.writes.get()==writesBefore);
+    } finally {
+      edt(()->{context.endComposition();text.removeInputMethodListener(observer);if(previous!=null)context.selectInputMethod(previous);return null;});
+    }
   }
   private static void dialogShot(Object dialog,String label)throws Exception {
     Window window=((com.intellij.openapi.ui.DialogWrapper)dialog).getWindow();
@@ -263,7 +306,9 @@ public final class MarkdownEditorIdeAcceptance implements ApplicationStarter {
     edt(()->{var event=new java.awt.event.InputMethodEvent(text,java.awt.event.InputMethodEvent.INPUT_METHOD_TEXT_CHANGED,null,0,null,null);for(var l:text.getInputMethodListeners())l.inputMethodTextChanged(event);text.setText(original);text.select(0,original.length());return null;});
     edt(()->{Method reset=support.getClass().getDeclaredMethod("resetUndo");reset.invoke(support);return null;});
     insertChecks(dialog);
-    physicalKeyboard(dialog,label);linkEditCheck(dialog,label);
+    physicalKeyboard(dialog,label);
+    if(Boolean.getBoolean("linuxdo.editor.system.ime"))systemIme(dialog,label);
+    linkEditCheck(dialog,label);
     edt(()->{text.setText(original);text.select(0,original.length());return null;});
     var colors=com.intellij.openapi.editor.colors.EditorColorsManager.getInstance();var previous=edt(colors::getGlobalScheme);
     var light=Arrays.stream(colors.getAllSchemes()).filter(c->!com.intellij.ui.ColorUtil.isDark(c.getDefaultBackground())).findFirst().orElseThrow();
@@ -313,7 +358,7 @@ public final class MarkdownEditorIdeAcceptance implements ApplicationStarter {
     SwingUtilities.invokeLater(()->WriteIntentReadAction.run((Runnable)()->{try{Method m=editClass.getDeclaredMethod("doOKAction");m.setAccessible(true);m.invoke(edit);}catch(Exception e){throw new RuntimeException(e);}}));
     await("edit saved",()->((com.intellij.openapi.ui.DialogWrapper)edit).isDisposed());
     check("EDIT_EXPLICIT_SAVE_PRESERVES_BASELINE_AND_REASON",fixture.writes.get()==editBefore+1&&fixture.editInput.get("original_text").getAsString().equals("Existing post body")&&fixture.editInput.get("edit_reason").getAsString().equals("fixture reason"));
-    report.println("INPUT_METHOD_CHECK=synthetic composition events delivered to actual IDEA editor; OS candidate UI not automated");
+    report.println(Boolean.getBoolean("linuxdo.editor.system.ime")?"INPUT_METHOD_CHECK=installed Windows Chinese IME; physical candidate Enter and Tab in three production dialogs":"INPUT_METHOD_CHECK=synthetic composition events delivered to actual IDEA editor; OS candidate UI not automated");
     report.println("REAL_FORUM_WRITES=0");report.println("SIMULATED_WRITES="+fixture.writes.get());
   }
 }

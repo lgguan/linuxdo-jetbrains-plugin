@@ -21,7 +21,7 @@
     "platform": "Windows",
     "ide": "IntelliJ IDEA Ultimate 2026.2.3",
     "build": "IU-262.10968.63",
-    "newEditorChecks": 70,
+    "newEditorChecks": 91,
     "projectFrames": 2,
     "passed": true,
     "report": "docs/reference/markdown-editor-ide.txt",
@@ -38,23 +38,36 @@
         "passed": true,
         "report": "docs/reference/markdown-editor-composer.txt",
         "transport": "memory HTTP",
-        "realForumWrites": 0
+        "realForumWrites": 0,
+        "artifactSha256": "afb3a55519e3cb187abeecb450e8d57be1b6e462fb6115ad0f86ed9a3db1b3eb"
       },
       "personal": {
         "checks": 35,
         "passed": true,
         "report": "docs/reference/markdown-editor-personal.txt",
         "transport": "memory HTTP",
-        "realForumWrites": 0
+        "realForumWrites": 0,
+        "artifactSha256": "afb3a55519e3cb187abeecb450e8d57be1b6e462fb6115ad0f86ed9a3db1b3eb"
       },
       "notifications": {
         "checks": 38,
         "passed": true,
         "report": "docs/reference/markdown-editor-notifications.txt",
         "transport": "memory HTTP",
-        "realForumWrites": 0
+        "realForumWrites": 0,
+        "artifactSha256": "afb3a55519e3cb187abeecb450e8d57be1b6e462fb6115ad0f86ed9a3db1b3eb"
       }
-    }
+    },
+    "systemIme": {
+      "locale": "zh_CN",
+      "installedWindowsInputMethod": true,
+      "physicalEnterAndTab": true,
+      "candidateScreenshots": true,
+      "noUnexpectedSubmit": true
+    },
+    "artifactSha256": "afb3a55519e3cb187abeecb450e8d57be1b6e462fb6115ad0f86ed9a3db1b3eb",
+    "readerArtifactSha256": "afb3a55519e3cb187abeecb450e8d57be1b6e462fb6115ad0f86ed9a3db1b3eb",
+    "totalPassedChecks": 371
   },
   "build": {
     "test": true,
@@ -73,13 +86,12 @@
     "note": "No new server interfaces; site checks were not repeated."
   },
   "limitations": [
-    "OS IME candidate window not automated; composition events exercised in actual IDE editors.",
     "Combined legacy composer/reader process still fails initial reader focus setup; original assertions passed in separate IDE processes.",
     "macOS/Linux native acceptance not performed."
   ],
   "artifacts": {
     "plugin": "build/distributions/linuxdo-jetbrains-plugin-1.0.2.zip",
-    "pluginSha256": "fffe9ffb427e1bbac28ab0ec4139bb4e14092ab2de7a437f7ba7c965e8490a91",
+    "pluginSha256": "afb3a55519e3cb187abeecb450e8d57be1b6e462fb6115ad0f86ed9a3db1b3eb",
     "source": "build/delivery/linuxdo-jetbrains-plugin-1.0.2-source.zip"
   },
   "githubPush": false,
