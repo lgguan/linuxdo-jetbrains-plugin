@@ -1,0 +1,8 @@
+{
+  "tests": 420,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "transport": "pure transformations / simulated transport",
+  "desktopTests": true
+}

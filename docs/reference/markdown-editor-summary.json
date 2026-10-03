@@ -1,0 +1,88 @@
+{
+  "phase": 3,
+  "feature": "Markdown editor helpers",
+  "date": "2026-10-03",
+  "baseCommit": "0c24b0c",
+  "version": "1.0.2",
+  "scope": [
+    "new topic",
+    "regular reply",
+    "edit post"
+  ],
+  "tests": {
+    "tests": 420,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "transport": "pure transformations / simulated transport",
+    "desktopTests": true
+  },
+  "nativeIde": {
+    "platform": "Windows",
+    "ide": "IntelliJ IDEA Ultimate 2026.2.3",
+    "build": "IU-262.10968.63",
+    "newEditorChecks": 70,
+    "projectFrames": 2,
+    "passed": true,
+    "report": "docs/reference/markdown-editor-ide.txt",
+    "transport": "memory HTTP",
+    "simulatedWrites": 3,
+    "realForumWrites": 0,
+    "legacyComposerChecks": 130,
+    "legacyReaderChecks": 77,
+    "legacyChecksRunInSeparateProcesses": true,
+    "readerReport": "docs/reference/markdown-editor-reader.txt",
+    "regressions": {
+      "composer": {
+        "checks": 130,
+        "passed": true,
+        "report": "docs/reference/markdown-editor-composer.txt",
+        "transport": "memory HTTP",
+        "realForumWrites": 0
+      },
+      "personal": {
+        "checks": 35,
+        "passed": true,
+        "report": "docs/reference/markdown-editor-personal.txt",
+        "transport": "memory HTTP",
+        "realForumWrites": 0
+      },
+      "notifications": {
+        "checks": 38,
+        "passed": true,
+        "report": "docs/reference/markdown-editor-notifications.txt",
+        "transport": "memory HTTP",
+        "realForumWrites": 0
+      }
+    }
+  },
+  "build": {
+    "test": true,
+    "buildPlugin": true,
+    "verifyPlugin": true,
+    "report": "docs/reference/markdown-editor-build.txt"
+  },
+  "pluginVerifier": {
+    "version": "1.410",
+    "result": "Compatible",
+    "target": "IU-262.10968.63",
+    "report": "docs/reference/markdown-editor-plugin-verifier.txt"
+  },
+  "siteReadOnly": {
+    "newRequests": 0,
+    "note": "No new server interfaces; site checks were not repeated."
+  },
+  "limitations": [
+    "OS IME candidate window not automated; composition events exercised in actual IDE editors.",
+    "Combined legacy composer/reader process still fails initial reader focus setup; original assertions passed in separate IDE processes.",
+    "macOS/Linux native acceptance not performed."
+  ],
+  "artifacts": {
+    "plugin": "build/distributions/linuxdo-jetbrains-plugin-1.0.2.zip",
+    "pluginSha256": "fffe9ffb427e1bbac28ab0ec4139bb4e14092ab2de7a437f7ba7c965e8490a91",
+    "source": "build/delivery/linuxdo-jetbrains-plugin-1.0.2-source.zip"
+  },
+  "githubPush": false,
+  "published": false,
+  "versionChanged": false
+}

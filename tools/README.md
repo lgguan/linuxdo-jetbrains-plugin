@@ -8,6 +8,7 @@
 | --- | --- |
 | `personal-reference-check.py` | 现有专用 Chrome 页面的 5 个 GET，核对当前账号与四类个人接口；只导出字段名、类型及计数，不导出用户名、标题、正文或凭据 |
 | `personal-browser-check.py` | 独立浏览器上下文验证生产书签脚本的文本安全、楼层／话题目标、未知目标、续页及失败重试 |
+| `MarkdownEditorIdeAcceptance.java` | `ui --editor-only`：两个真实项目的三种生产编辑窗口，格式切换、键盘、输入法事件、对话框、主题及模拟草稿／编辑保存，所有 HTTP 在内存中处理 |
 | `PersonalIdeAcceptance.java` | `ui --personal-only`：两个真实 IDEA 项目窗口的生产列表、分页、筛选、草稿恢复、会话及老板键检查，内存 HTTP，拒绝所有写请求 |
 | `notification-reference-check.py` | 通过已有专用 Chrome 页面只读核对通知分页、状态、计数和本站类型配置；只保存字段与汇总，不访问 recent 或标读 |
 | `notification-navigation-regression.py` | 在独立浏览器上下文对生产导航脚本验证显示确认、缺失目标、失败、取消、不可见正文与旧回调；仅使用本地模拟页面 |
@@ -50,6 +51,8 @@ python tools/smoke.py ui --ide-home '/path/to/IDE' --plugin-zip build/distributi
 Windows 示例：`python tools/smoke.py private --ide-home 'C:\path\to\WebStorm'`。默认离线构建，依赖尚未缓存时加 `--online`。联网模式默认使用 LinuxDo DoH，可通过 `--doh-url` 指定测试地址。
 
 独立 JCEF 检查需要桌面会话，Linux CI 可使用 `xvfb-run`。结果位于 `build/portable-smoke/`，成功标记为 `PORTABLE_NATIVE_PASS=true`；联网检查需各项断言通过且进程正常退出。安装包检查结果位于 `build/host-smoke/`；商业 IDE 的许可可能限制完整启动。模拟 Application 的检查不能替代安装包类加载验证，真实账号及桌面交互仍需按[跨平台指南](../docs/cross-platform.md)验收。
+
+第三期可用 `ui --editor-only` 验证三种编辑窗口的 Markdown 辅助。现有回归可分为 `--composer-only`（浏览与编辑器）和 `--reader-only`（正文与浏览器），分别运行隔离 IDE，保留原断言并减少不同窗口初始化的焦点干扰。综合探针仍保留默认入口；本期同进程初始焦点失败记录见[编辑辅助验收](../docs/markdown-editor-verification.md)。
 
 `ui` 使用已打包插件中的话题列表、高级搜索、创建与回复窗口、定时器和正文阅读器，输出 `IDE_UI_PASS=true`、断言报告与截图；自动建立空配置，避免首次启动导入个人设置。覆盖标签组合请求、分页、键盘选择与整块鼠标点击、菜单内移除、窄窗口换行、提示状态、主题与缩放。草稿延迟、断网、409 和发送均由内存传输模拟，并记录 EDT 响应时间。工具不打入插件包。
 

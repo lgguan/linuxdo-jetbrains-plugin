@@ -35,10 +35,13 @@ internal class EditPostDialog(
         { previewVisible = true; previewPanel.isVisible = true },)
     private var busy = false
     private var uncertain = false
+    private lateinit var editorPanel: JPanel
     init {
         title = "编辑帖子 #${initial.postNumber}"
         setOKButtonText("保存编辑")
         init()
+        editor.resetUndo()
+        ComposerAppearance.followTheme(disposable, contentPanel, text, editorPanel) { preview.refreshTheme() }
         Disposer.register(disposable, tasks); Disposer.register(disposable, preview)
         text.document.addDocumentListener(object : javax.swing.event.DocumentListener {
             override fun insertUpdate(e: javax.swing.event.DocumentEvent?) = changed()
@@ -51,7 +54,14 @@ internal class EditPostDialog(
         preferredSize = Dimension(820,600)
         add(JPanel(BorderLayout(6,0)).apply { add(JBLabel("编辑原因"),BorderLayout.WEST); add(reason) },BorderLayout.NORTH)
         val counter = JBLabel("Markdown")
-        add(JSplitPane(JSplitPane.HORIZONTAL_SPLIT, ComposerAppearance.editor(text, editor.toolbar, counter), previewPanel).apply { resizeWeight = .55 },BorderLayout.CENTER)
+        editorPanel = ComposerAppearance.editor(text, editor.toolbar, counter)
+        val split = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, editorPanel, previewPanel).apply { resizeWeight = .55 }
+        addComponentListener(object : java.awt.event.ComponentAdapter() {
+            override fun componentResized(event: java.awt.event.ComponentEvent?) {
+                split.orientation = if (width < com.intellij.util.ui.JBUI.scale(760)) JSplitPane.VERTICAL_SPLIT else JSplitPane.HORIZONTAL_SPLIT
+            }
+        })
+        add(split,BorderLayout.CENTER)
         add(status,BorderLayout.SOUTH)
     }
     override fun doOKAction() {
@@ -84,7 +94,7 @@ internal class EditPostDialog(
                             add(JSplitPane(JSplitPane.HORIZONTAL_SPLIT,versionPanel("本地正文",local),versionPanel("服务器正文 · 版本 ${server.version ?: "未知"}",server.raw)))
                         }
                     }
-                    if (choice.showAndGet()) { baseline=server;if(useServer){text.text=server.raw;reason.text=""}; status.text="已更新冲突基线；请核对内容后再次点击保存" }
+                    if (choice.showAndGet()) { baseline=server;if(useServer){text.text=server.raw;reason.text="";editor.resetUndo()}; status.text="已更新冲突基线；请核对内容后再次点击保存" }
                     else status.text="编辑冲突，当前文本已保留"
                 } else {
                     uncertain=result.error is UnconfirmedOperationException

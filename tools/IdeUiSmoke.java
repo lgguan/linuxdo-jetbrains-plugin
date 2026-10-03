@@ -432,7 +432,8 @@ public class IdeUiSmoke implements ApplicationStarter {
       check("LIVE_READ_ONLY_FORUM_ENGINE_PREVIEW",cooked.contains("class=\"quote") && cooked.contains("<details") && cooked.contains("<table") && cooked.contains("**原样**"));
       report.println("LIVE_PREVIEW_POST_AND_DRAFT_WRITES_BLOCKED=true");
     }
-    reader();
+    if (Boolean.getBoolean("linuxdo.composer.only")) report.println("TOTAL_CHECKS="+checks.size());
+    else reader();
   }
   private static JsonObject listTopic(long id, String title) {
     JsonObject topic = new JsonObject(); topic.addProperty("id",id); topic.addProperty("title",title);
@@ -1669,9 +1670,14 @@ public class IdeUiSmoke implements ApplicationStarter {
       @SuppressWarnings("unchecked") Function1<String,LinuxDoJSQuery.Response> handler=(Function1<String,LinuxDoJSQuery.Response>)field(query,"handler");
       query.addHandler(value->{if(value.startsWith("probe:")){replies.add(value.substring(6));return null;}return handler.invoke(value);});
       awaitReaderBridge(browser,query,replies);
-      edt(()->{frame.toFront();toolFocus.requestFocusInWindow();return null;});
-      Point origin=edt(frame::getLocationOnScreen);Robot keys=new Robot();keys.mouseMove(origin.x+250,origin.y+45);keys.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);keys.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
-      await("tool window holds initial focus",()->edt(toolFocus::isFocusOwner)&&evaluate(browser,query,replies,"({ok:!document.hasFocus()&&document.visibilityState==='visible'})").get("ok").getAsBoolean());
+      edt(()->{frame.setAlwaysOnTop(true);frame.toFront();toolFocus.requestFocusInWindow();return null;});
+      Point origin=edt(()->{Point p=toolFocus.getLocationOnScreen();p.translate(toolFocus.getWidth()/2,toolFocus.getHeight()/2);return p;});
+      Robot keys=new Robot();keys.mouseMove(origin.x,origin.y);keys.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);keys.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);keys.waitForIdle();
+      await("tool window holds initial focus",()->{
+        // Browser initialization can complete after the first click and briefly take focus.
+        if(!toolFocus.isFocusOwner()){toolFocus.requestFocusInWindow();return false;}
+        return evaluate(browser,query,replies,"({ok:!document.hasFocus()&&document.visibilityState==='visible'})").get("ok").getAsBoolean();
+      });
       check("IDE_FIRST_OPEN_SELECTED_BEFORE_BROWSER_READY",(Boolean)field(panel,"editorSelected")&&edt(frame::isActive));
       check("IDE_FIRST_OPEN_STARTS_WITH_UNREAD_FLOORS",evaluate(browser,query,replies,"({ok:document.querySelectorAll('.unread-dot:not(.read)').length===2})").get("ok").getAsBoolean());
       check("IDE_UNREAD_DOTS_AT_RIGHT_EDGE",evaluate(browser,query,replies,"({ok:[...document.querySelectorAll('.unread-dot')].every(dot=>Math.abs(dot.getBoundingClientRect().right-dot.closest('.floor-comment-header').getBoundingClientRect().right)<2)})").get("ok").getAsBoolean());

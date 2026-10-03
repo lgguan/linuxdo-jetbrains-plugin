@@ -1,0 +1,143 @@
+> Task :initializeIntelliJPlugin SKIPPED
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :patchPluginXml UP-TO-DATE
+> Task :verifyPluginConfiguration
+> Task :verifyBoostAssets
+> Task :verifyReaderAssets
+> Task :processResources UP-TO-DATE
+> Task :downloadAndroidStudioProductReleasesXml
+> Task :downloadIdeaProductReleasesXml
+> Task :listProductsReleases SKIPPED
+> Task :compileKotlin
+> Task :compileJava UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :instrumentCode UP-TO-DATE
+> Task :jar UP-TO-DATE
+> Task :compileTestKotlin UP-TO-DATE
+> Task :classpathIndexCleanup
+> Task :instrumentedJar UP-TO-DATE
+> Task :prepareSandbox UP-TO-DATE
+> Task :buildSearchableOptions SKIPPED
+> Task :jarSearchableOptions SKIPPED
+> Task :buildPlugin UP-TO-DATE
+> Task :verifyPlugin
+
+> Task :runPluginVerifier
+Starting the IntelliJ Plugin Verifier 1.410
+2026-10-03T21:55:34 [main] INFO  c.j.p.options.OptionsParser - The verification directory D:\developer\workspace\IdeaProjects\linuxdo-jetbrains-plugin\build\reports\pluginVerifier is being deleted because it is not empty.
+Verification reports directory: D:\developer\workspace\IdeaProjects\linuxdo-jetbrains-plugin\build\reports\pluginVerifier
+2026-10-03T21:56:20 [main] INFO  verification - Reading IDE C:\Users\lgguan\AppData\Local\Programs\IntelliJ IDEA Ultimate
+2026-10-03T21:56:20 [main] INFO  c.j.p.options.OptionsParser - Reading IDE from C:\Users\lgguan\AppData\Local\Programs\IntelliJ IDEA Ultimate
+2026-10-03T21:56:20 [main] INFO  c.j.p.options.OptionsParser - Using Java runtime from C:\Users\lgguan\AppData\Local\Programs\IntelliJ IDEA Ultimate\jbr
+2026-10-03T21:56:20 [main] WARN  c.j.p.s.i.r.ValidatingLayoutComponentsProvider - Layout component 'intellij.android.gradle.declarative.lang' has some nonexistent 'classPath' elements: 'plugins\android-gradle-declarative-lang-ide\lib\modules\intellij.android.gradle.declarative.lang.jar'
+Layout component 'intellij.android.gradle.declarative.lang.flags' has some nonexistent 'classPath' elements: 'plugins\android-gradle-declarative-lang-ide\lib\modules\intellij.android.gradle.declarative.lang.flags.jar'
+Layout component 'intellij.android.gradle.declarative.lang.sync' has some nonexistent 'classPath' elements: 'plugins\android-gradle-declarative-lang-ide\lib\modules\intellij.android.gradle.declarative.lang.sync.jar'
+Layout component 'intellij.clouds.docker.agent' has some nonexistent 'classPath' elements: 'plugins\clouds-docker-impl\lib\modules\intellij.clouds.docker.agent.jar'
+Layout component 'intellij.clouds.docker.dependencies' has some nonexistent 'classPath' elements: 'plugins\clouds-docker-impl\lib\modules\intellij.clouds.docker.dependencies.jar'
+Layout component 'intellij.clouds.docker.devcontainers.cli' has some nonexistent 'classPath' elements: 'plugins\clouds-docker-gateway\lib\modules\intellij.clouds.docker.devcontainers.cli.jar'
+Layout component 'intellij.clouds.kubernetes' has some nonexistent 'classPath' elements: 'plugins\clouds-kubernetes\lib\modules\intellij.clouds.kubernetes.jar'
+Layout component 'intellij.clouds.kubernetes.libraries' has some nonexistent 'classPath' elements: 'plugins\clouds-kubernetes\lib\modules\intellij.clouds.kubernetes.libraries.jar'
+Layout component 'intellij.dfa.analysis.rml' has some nonexistent 'classPath' elements: 'plugins\dfa-analysis-plugin\lib\modules\intellij.dfa.analysis.rml.jar'
+Layout component 'intellij.dfa.analysis.rml.intellij' has some nonexistent 'classPath' elements: 'plugins\dfa-analysis-plugin\lib\modules\intellij.dfa.analysis.rml.intellij.jar'
+Layout component 'intellij.dfa.analysis.rml.taint' has some nonexistent 'classPath' elements: 'plugins\dfa-analysis-plugin\lib\modules\intellij.dfa.analysis.rml.taint.jar'
+Layout component 'intellij.dfa.analysis.ui' has some nonexistent 'classPath' elements: 'plugins\dfa-analysis-plugin\lib\modules\intellij.dfa.analysis.ui.jar'
+Layout component 'intellij.driver.client' has some nonexistent 'classPath' elements: 'plugins\performanceTesting\lib\modules\intellij.driver.client.jar'
+Layout component 'intellij.driver.impl' has some nonexistent 'classPath' elements: 'plugins\performanceTesting\lib\modules\intellij.driver.impl.jar'
+Layout component 'intellij.driver.model' has some nonexistent 'classPath' elements: 'plugins\performanceTesting\lib\modules\intellij.driver.model.jar'
+Layout component 'intellij.gradle' has some nonexistent 'classPath' elements: 'plugins\gradle-plugin\lib\modules\intellij.gradle.jar'
+Layout component 'intellij.gradle.java' has some nonexistent 'classPath' elements: 'plugins\gradle-java-plugin\lib\modules\intellij.gradle.java.jar'
+Layout component 'intellij.gradle.settings' has some nonexistent 'classPath' elements: 'plugins\gradle-plugin\lib\modules\intellij.gradle.settings.jar'
+Layout component 'intellij.gradle.toolingExtension' has some nonexistent 'classPath' elements: 'plugins\gradle-plugin\lib\modules\intellij.gradle.toolingExtension.jar'
+Layout component 'intellij.gradle.toolingExtension.impl' has some nonexistent 'classPath' elements: 'plugins\gradle-plugin\lib\modules\intellij.gradle.toolingExtension.impl.jar'
+Layout component 'intellij.gradle.toolingProxy' has some nonexistent 'classPath' elements: 'plugins\gradle-plugin\lib\modules\intellij.gradle.toolingProxy.jar'
+Layout component 'intellij.grazie.core' has some nonexistent 'classPath' elements: 'plugins\grazie\lib\modules\intellij.grazie.core.jar'
+Layout component 'intellij.java.compiler.antTasks' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.java.compiler.antTasks.jar'
+Layout component 'intellij.java.compiler.instrumentationUtil' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.java.compiler.instrumentationUtil.jar'
+Layout component 'intellij.java.compiler.instrumentationUtil.java8' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.java.compiler.instrumentationUtil.java8.jar'
+Layout component 'intellij.java.debugger.impl.shared' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.java.debugger.impl.shared.jar'
+Layout component 'intellij.java.execution.impl.shared' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.java.execution.impl.shared.jar'
+Layout component 'intellij.java.frontback.impl' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.java.frontback.impl.jar'
+Layout component 'intellij.java.frontback.psi' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.java.frontback.psi.jar'
+Layout component 'intellij.java.frontback.psi.impl' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.java.frontback.psi.impl.jar'
+Layout component 'intellij.java.guiForms.compiler' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.java.guiForms.compiler.jar'
+Layout component 'intellij.java.psi' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.java.psi.jar'
+Layout component 'intellij.java.psi.impl' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.java.psi.impl.jar'
+Layout component 'intellij.java.syntax' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.java.syntax.jar'
+Layout component 'intellij.javaee.jpa.jpb.model.core' has some nonexistent 'classPath' elements: 'plugins\JPA Model\lib\modules\intellij.javaee.jpa.jpb.model.core.jar'
+Layout component 'intellij.json' has some nonexistent 'classPath' elements: 'plugins\json\lib\modules\intellij.json.jar'
+Layout component 'intellij.json.syntax' has some nonexistent 'classPath' elements: 'plugins\json\lib\modules\intellij.json.syntax.jar'
+Layout component 'intellij.kotlin.base.resources' has some nonexistent 'classPath' elements: 'plugins\Kotlin\lib\modules\intellij.kotlin.base.resources.jar'
+Layout component 'intellij.kotlin.codeInsight.shared' has some nonexistent 'classPath' elements: 'plugins\Kotlin\lib\modules\intellij.kotlin.codeInsight.shared.jar'
+Layout component 'intellij.kotlin.highlighting.minimal' has some nonexistent 'classPath' elements: 'plugins\Kotlin\lib\modules\intellij.kotlin.highlighting.minimal.jar'
+Layout component 'intellij.kotlin.jvm.debugger.base.util' has some nonexistent 'classPath' elements: 'plugins\Kotlin\lib\modules\intellij.kotlin.jvm.debugger.base.util.jar'
+Layout component 'intellij.kotlin.jvm.debugger.coroutines' has some nonexistent 'classPath' elements: 'plugins\Kotlin\lib\modules\intellij.kotlin.jvm.debugger.coroutines.jar'
+Layout component 'intellij.libraries.ai.grazie.spell.gec.engine.local' has some nonexistent 'classPath' elements: 'plugins\grazie\lib\modules\intellij.libraries.ai.grazie.spell.gec.engine.local.jar'
+Layout component 'intellij.libraries.assertj.core' has some nonexistent 'classPath' elements: 'plugins\performanceTesting\lib\modules\intellij.libraries.assertj.core.jar'
+Layout component 'intellij.libraries.assertj.core' has some nonexistent 'classPath' elements: 'plugins\featuresTrainer\lib\modules\intellij.libraries.assertj.core.jar'
+Layout component 'intellij.libraries.groovy' has some nonexistent 'classPath' elements: 'plugins\groovy-scripting\lib\modules\intellij.libraries.groovy.jar'
+Layout component 'intellij.libraries.groovy.jsr223' has some nonexistent 'classPath' elements: 'plugins\groovy-scripting\lib\modules\intellij.libraries.groovy.jsr223.jar'
+Layout component 'intellij.libraries.ivy' has some nonexistent 'classPath' elements: 'plugins\groovy-scripting\lib\modules\intellij.libraries.ivy.jar'
+Layout component 'intellij.libraries.maven.resolver.provider' has some nonexistent 'classPath' elements: 'plugins\java-aetherDependencyResolver-plugin\lib\modules\intellij.libraries.maven.resolver.provider.jar'
+Layout component 'intellij.libraries.plexus.utils' has some nonexistent 'classPath' elements: 'plugins\java-aetherDependencyResolver-plugin\lib\modules\intellij.libraries.plexus.utils.jar'
+Layout component 'intellij.libraries.test.discovery' has some nonexistent 'classPath' elements: 'plugins\java-coverage\lib\modules\intellij.libraries.test.discovery.jar'
+Layout component 'intellij.libraries.test.discovery' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.libraries.test.discovery.jar'
+Layout component 'intellij.libraries.testng' has some nonexistent 'classPath' elements: 'plugins\testng\lib\modules\intellij.libraries.testng.jar'
+Layout component 'intellij.markdown' has some nonexistent 'classPath' elements: 'plugins\markdown\lib\modules\intellij.markdown.jar'
+Layout component 'intellij.maven' has some nonexistent 'classPath' elements: 'plugins\maven-plugin\lib\modules\intellij.maven.jar'
+Layout component 'intellij.maven.model' has some nonexistent 'classPath' elements: 'plugins\maven-plugin\lib\modules\intellij.maven.model.jar'
+Layout component 'intellij.platform.commercial.license' has some nonexistent 'classPath' elements: 'lib\intellij.platform.commercial.license.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\xml-refactoring\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\velocity\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\webDeployment\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\quarkus\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\microservices-jvm\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\freemarker\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\Spring\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\DatabaseTools\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\spring-modulith\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\javaee-jax-rs\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\micronaut\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\JavaeeWeb\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\spring-boot-initializr\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\JavaEE\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\aopCommon\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.commercial.verifier' has some nonexistent 'classPath' elements: 'plugins\uml\lib\modules\intellij.platform.commercial.verifier.jar'
+Layout component 'intellij.platform.jps.build.javac.rt' has some nonexistent 'classPath' elements: 'plugins\java\lib\modules\intellij.platform.jps.build.javac.rt.jar'
+Layout component 'intellij.properties' has some nonexistent 'classPath' elements: 'plugins\properties\lib\modules\intellij.properties.jar'
+Layout component 'intellij.properties.psi' has some nonexistent 'classPath' elements: 'plugins\properties\lib\modules\intellij.properties.psi.jar'
+Layout component 'intellij.qodana.sarif' has some nonexistent 'classPath' elements: 'plugins\qodana\lib\modules\intellij.qodana.sarif.jar'
+Layout component 'intellij.qodana.util' has some nonexistent 'classPath' elements: 'plugins\qodana\lib\modules\intellij.qodana.util.jar'
+Layout component 'intellij.sh.core' has some nonexistent 'classPath' elements: 'plugins\sh-plugin\lib\modules\intellij.sh.core.jar'
+Layout component 'intellij.toml.core' has some nonexistent 'classPath' elements: 'plugins\toml\lib\modules\intellij.toml.core.jar'
+Layout component 'intellij.vcs.github' has some nonexistent 'classPath' elements: 'plugins\vcs-github\lib\modules\intellij.vcs.github.jar'
+Layout component 'intellij.vcs.gitlab' has some nonexistent 'classPath' elements: 'plugins\vcs-gitlab\lib\modules\intellij.vcs.gitlab.jar'
+Layout component 'intellij.yaml' has some nonexistent 'classPath' elements: 'plugins\yaml\lib\modules\intellij.yaml.jar'
+2026-10-03T21:56:21 [main] INFO  verification - Reading plugin to check from D:\developer\workspace\IdeaProjects\linuxdo-jetbrains-plugin\build\distributions\linuxdo-jetbrains-plugin-1.0.2.zip
+2026-10-03T21:56:22 [main] INFO  verification - Task check-plugin parameters:
+Scheduled verifications (1):
+com.lgguan.linuxdo.plugin:1.0.2 against IU-262.10968.63
+
+2026-10-03T21:56:48 [main] INFO  verification - Finished 1 of 1 verifications (in 25.3 s): IU-262.10968.63 against com.lgguan.linuxdo.plugin:1.0.2: Compatible
+2026-10-03T21:56:48 [main] INFO  c.j.p.PluginVerifierMain - Started printing results (CheckPluginResultPrinter)
+Plugin com.lgguan.linuxdo.plugin:1.0.2 against IU-262.10968.63: Compatible
+Dynamic Plugin Eligibility:
+    Plugin can probably be enabled or disabled without IDE restart
+
+2026-10-03T21:56:48 [main] INFO  c.j.p.PluginVerifierMain - Finished printing results in 82ms
+2026-10-03T21:56:48 [main] INFO  verification - Total time spent downloading plugins and their dependencies: 0 ms
+2026-10-03T21:56:48 [main] INFO  verification - Total amount of plugins and dependencies downloaded: 0 B
+2026-10-03T21:56:48 [main] INFO  verification - Total amount of space used for plugins and dependencies: 0 B
+2026-10-03T21:56:48 [main] INFO  verification - PluginDetailsCache statistics: hits=127, misses=36, failures=0, evictions=0, total=163, hit-rate=77.9%
+2026-10-03T21:56:48 [main] INFO  verification - Verification reports for com.lgguan.linuxdo.plugin:1.0.2 saved to D:\developer\workspace\IdeaProjects\linuxdo-jetbrains-plugin\build\reports\pluginVerifier\IU-262.10968.63
+2026-10-03T21:56:48 [main] INFO  verification - Total time spent in plugin verification: 27 s 524 ms
+
+[Incubating] Problems report is available at: file:///D:/developer/workspace/IdeaProjects/linuxdo-jetbrains-plugin/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 1m 29s
+18 actionable tasks: 9 executed, 9 up-to-date

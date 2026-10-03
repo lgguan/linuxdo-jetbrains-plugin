@@ -1,0 +1,40 @@
+> Task :checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :initializeIntelliJPlugin SKIPPED
+> Task :patchPluginXml UP-TO-DATE
+> Task :verifyPluginConfiguration
+> Task :verifyBoostAssets
+> Task :verifyReaderAssets
+> Task :processResources UP-TO-DATE
+> Task :processTestResources UP-TO-DATE
+> Task :compileKotlin
+> Task :compileJava UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :instrumentCode
+> Task :instrumentedJar
+> Task :jar
+> Task :compileTestKotlin
+> Task :prepareTestingSandbox
+> Task :compileTestJava NO-SOURCE
+> Task :testClasses UP-TO-DATE
+> Task :instrumentTestCode UP-TO-DATE
+> Task :classpathIndexCleanup
+
+> Task :test
+CompileCommand: exclude com/intellij/openapi/vfs/impl/FilePartNodeRoot.trieDescend bool exclude = true
+
+> Task :prepareSandbox
+> Task :buildSearchableOptions SKIPPED
+> Task :jarSearchableOptions SKIPPED
+> Task :buildPlugin
+> Task :verifyPlugin
+
+[Incubating] Problems report is available at: file:///D:/developer/workspace/IdeaProjects/linuxdo-jetbrains-plugin/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 23s
+19 actionable tasks: 14 executed, 5 up-to-date
