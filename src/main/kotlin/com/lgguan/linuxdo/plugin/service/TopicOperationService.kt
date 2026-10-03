@@ -91,6 +91,8 @@ internal class TopicOperationService(
             val refreshed = transport.post(postId, version).getOrNull()
             checkSession(version)
             val reconciled = error != null && !definite(error) && refreshed != null && confirmed(post,refreshed,action,input)
+            if(transport === ForumOperationTransport && action in setOf("bookmark", "unbookmark") && (error == null || reconciled))
+                PersonalContentService.getInstance().invalidate(PersonalContentKind.BOOKMARKS, version)
             OperationResult(refreshed, response.getOrNull(), if(reconciled)null else error?.let { if (definite(it)) it else UnconfirmedOperationException(it) })
         } catch (error: Throwable) { OperationResult(observed, null, error) }
     }

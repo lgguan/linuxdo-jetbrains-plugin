@@ -6,6 +6,9 @@
 
 | 文件 | 用途 |
 | --- | --- |
+| `personal-reference-check.py` | 现有专用 Chrome 页面的 5 个 GET，核对当前账号与四类个人接口；只导出字段名、类型及计数，不导出用户名、标题、正文或凭据 |
+| `personal-browser-check.py` | 独立浏览器上下文验证生产书签脚本的文本安全、楼层／话题目标、未知目标、续页及失败重试 |
+| `PersonalIdeAcceptance.java` | `ui --personal-only`：两个真实 IDEA 项目窗口的生产列表、分页、筛选、草稿恢复、会话及老板键检查，内存 HTTP，拒绝所有写请求 |
 | `notification-reference-check.py` | 通过已有专用 Chrome 页面只读核对通知分页、状态、计数和本站类型配置；只保存字段与汇总，不访问 recent 或标读 |
 | `notification-navigation-regression.py` | 在独立浏览器上下文对生产导航脚本验证显示确认、缺失目标、失败、取消、不可见正文与旧回调；仅使用本地模拟页面 |
 | `clean-release-build.py` | 在干净目录构建当前源码，比较发布 ZIP 的 SHA-256 |

@@ -1,0 +1,21 @@
+{
+  "passed": 16,
+  "results": [
+    "one tail request without gap backfill",
+    "tail stays above navigation",
+    "return to previous floor is local",
+    "latest queued jump with request spacing",
+    "stale target never replaces current floor",
+    "stale page responses are ignored",
+    "failed jump preserves return destination",
+    "429 blocks remote navigation",
+    "return works locally during 429 cooldown",
+    "cooldown does not replay requests",
+    "one adjacent upward batch",
+    "downward batch starts after loaded edge",
+    "narrow layout has no overflow",
+    "selection quote preserves Chinese and newlines",
+    "selected code uses Markdown fence",
+    "cross-floor selection cannot quote a wrong author"
+  ]
+}

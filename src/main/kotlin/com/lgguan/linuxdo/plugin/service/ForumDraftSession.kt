@@ -36,13 +36,13 @@ internal data class TopicDraftContent(val title: String = "", val body: String =
 internal data class DraftEntry(val key: String, val draft: ForumDraft, val updatedAt: String) {
     val topic: Boolean get() = (key == "new_topic" || key.startsWith("new_topic_")) && draft.isTopicDraft
     companion object {
-        fun parse(response: JsonObject): List<DraftEntry> = response.getAsJsonArray("drafts")?.map { item ->
+        fun parse(response: JsonObject): List<DraftEntry> = response.getAsJsonArray("drafts")?.mapNotNull { item -> runCatching {
             val obj = item.asJsonObject
             val raw = obj.get("data")?.takeUnless { it.isJsonNull }
             val data = raw?.let { if (it.isJsonPrimitive) JsonParser.parseString(it.asString).asJsonObject else it.asJsonObject }
             DraftEntry(obj.get("draft_key").asString, ForumDraft(obj.get("sequence").asLong, data),
                 (obj.get("updated_at") ?: obj.get("created_at"))?.takeUnless { it.isJsonNull }?.asString.orEmpty())
-        }.orEmpty()
+        }.getOrNull() }.orEmpty()
     }
 }
 
@@ -85,7 +85,10 @@ internal class ForumDraftSession(
         if ((result.exceptionOrNull() as? HttpStatusException)?.status == 409) conflicted = true
         val sequence = result.getOrThrow()
         checkSession(version)
-        return ForumDraft(sequence, data).also { draft = it }
+        return ForumDraft(sequence, data).also {
+            draft = it
+            if(transport === ForumDraftTransport) PersonalContentService.getInstance().draftSaved(key, it, version)
+        }
     }
     enum class Cleanup { CLEARED, OTHER_CLIENT }
     @Synchronized fun clearOwned(): Cleanup {
@@ -95,12 +98,18 @@ internal class ForumDraftSession(
         require(supported(owned)) { "此草稿类型请在网页继续" }
         val current = transport.read(key, version).getOrThrow()
         checkSession(version)
-        if (current.data == null) return Cleanup.CLEARED
+        if (current.data == null) {
+            if(transport === ForumDraftTransport) PersonalContentService.getInstance().draftCleared(key, version)
+            return Cleanup.CLEARED
+        }
         if (current != owned) return Cleanup.OTHER_CLIENT
         transport.delete(key, owned.sequence, version).getOrThrow()
         val after = transport.read(key, version).getOrThrow()
         checkSession(version)
-        return if (after.data == null) Cleanup.CLEARED else Cleanup.OTHER_CLIENT
+        return if (after.data == null) {
+            if(transport === ForumDraftTransport) PersonalContentService.getInstance().draftCleared(key, version)
+            Cleanup.CLEARED
+        } else Cleanup.OTHER_CLIENT
     }
     @Synchronized fun <T> publish(transform: (JsonObject?) -> JsonObject, send: () -> T): Pair<T, Result<Cleanup>> {
         save(transform)

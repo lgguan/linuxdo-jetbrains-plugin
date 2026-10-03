@@ -1,0 +1,78 @@
+{
+  "phase": "personal content entry / unpublished",
+  "date": "2026-10-03",
+  "versionUnchanged": "1.0.2",
+  "unitTests": {
+    "transport": "simulated / local fixtures",
+    "desktopTests": true,
+    "suites": 49,
+    "tests": 370,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "siteReadonly": {
+    "gets": 5,
+    "statuses": [
+      200,
+      200,
+      200,
+      200,
+      200
+    ],
+    "topics": 1,
+    "replies": 1,
+    "bookmarks": 1,
+    "drafts": 0,
+    "writes": 0,
+    "limitations": [
+      "pagination not verified on site",
+      "no nonempty drafts on site",
+      "failure scenarios use memory transport"
+    ]
+  },
+  "nativeIde": {
+    "os": "Windows",
+    "ide": "IntelliJ IDEA Ultimate 2026.2.3",
+    "build": "262.10968.63",
+    "personalChecks": 35,
+    "projects": 2,
+    "transport": "synthetic credentials / memory HTTP",
+    "writes": 0,
+    "evidence": "personal-content-ide.txt",
+    "screenshots": [
+      "../images/personal-project-a.png",
+      "../images/personal-project-b.png"
+    ]
+  },
+  "nativeRegressions": {
+    "notifications": 38,
+    "editorSearchComposerReader": 207,
+    "evidence": [
+      "personal-notification-ide.txt",
+      "personal-regression-ide.txt"
+    ],
+    "note": "Full regression passed before the final personal-pane visibility/auth listener and missing-reply-floor handling; final personal run validates those changes."
+  },
+  "browserFixtures": {
+    "bookmarkReader": 6,
+    "navigation": 16,
+    "notificationNavigation": 11,
+    "writes": 0
+  },
+  "pluginVerifier": {
+    "ide": "IU-262.10968.63",
+    "result": "Compatible",
+    "evidence": "personal-content-plugin-verifier.txt"
+  },
+  "artifact": {
+    "path": "build/distributions/linuxdo-jetbrains-plugin-1.0.2.zip",
+    "sha256": "7017509426e294cbe5c97dee87c57ce1bf4519d2cfeb6d4544bb36b4f631e1b9"
+  },
+  "scope": {
+    "pushed": false,
+    "published": false,
+    "realForumWrites": 0,
+    "macLinuxNativeAcceptance": "deferred"
+  }
+}

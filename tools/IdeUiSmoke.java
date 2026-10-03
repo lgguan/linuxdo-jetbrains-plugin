@@ -168,9 +168,9 @@ public class IdeUiSmoke implements ApplicationStarter {
       (Function1<Long, Unit>)version -> { SessionEpoch.INSTANCE.requireCurrent(version); return Unit.INSTANCE; });
     return edt(() -> {
       Constructor<?> constructor = Arrays.stream(CommitReplyDialog.class.getDeclaredConstructors())
-        .filter(c -> c.getParameterCount() == 9).findFirst().orElseThrow();
+        .filter(c -> c.getParameterCount() == 10).findFirst().orElseThrow();
       constructor.setAccessible(true);
-      DialogWrapper dialog = (DialogWrapper)constructor.newInstance(project, 482293L, 2, "requested_author", 9002L, quote, null, session, environment);
+      DialogWrapper dialog = (DialogWrapper)constructor.newInstance(project, 482293L, 2, "requested_author", 9002L, quote, null, session, environment, false);
       dialog.show(); dialog.getWindow().setLocation(120, 100);
       return dialog;
     });
@@ -876,9 +876,9 @@ public class IdeUiSmoke implements ApplicationStarter {
         return (DialogWrapper)entry.invoke(CreateTopicDialog.Companion,project,session,environment);
       }
       Constructor<?> constructor = Arrays.stream(CreateTopicDialog.class.getDeclaredConstructors())
-        .filter(c -> c.getParameterCount()==5 && c.getParameterTypes()[3]==ForumDraftSession.class).findFirst().orElseThrow();
+        .filter(c -> c.getParameterCount()==6 && c.getParameterTypes()[3]==ForumDraftSession.class).findFirst().orElseThrow();
       constructor.setAccessible(true);
-      DialogWrapper dialog = (DialogWrapper)constructor.newInstance(project,null,null,session,environment);
+      DialogWrapper dialog = (DialogWrapper)constructor.newInstance(project,null,null,session,environment,false);
       dialog.show(); dialog.getWindow().setLocation(120,100); return dialog;
     });
   }

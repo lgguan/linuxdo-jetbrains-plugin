@@ -1,0 +1,17 @@
+{
+  "passed": 11,
+  "checks": [
+    "new remote floor waits until body is displayed",
+    "existing loaded floor is acknowledged after positioning",
+    "notification without floor confirms a visible body",
+    "stale page cannot acknowledge current request",
+    "missing floor preserves unread",
+    "failed floor request and cooldown cannot confirm display",
+    "failure never automatically replays a navigation",
+    "superseding navigation cancels pending notification",
+    "late floor response cannot restore cancelled confirmation",
+    "hidden body does not count as displayed",
+    "replaced request cannot mark the earlier notification"
+  ],
+  "realForumWrites": 0
+}

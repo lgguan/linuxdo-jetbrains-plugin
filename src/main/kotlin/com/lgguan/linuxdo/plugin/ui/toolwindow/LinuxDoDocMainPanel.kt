@@ -28,6 +28,6 @@ class LinuxDoDocMainPanel(private val project: Project) : JPanel(BorderLayout())
     }
 
     fun refreshAll() {
-        issueListPanel.loadInitialData()
+        if(issueListPanel.personalView) issueListPanel.personalContentPanel.refreshCurrent() else issueListPanel.loadInitialData()
     }
 }

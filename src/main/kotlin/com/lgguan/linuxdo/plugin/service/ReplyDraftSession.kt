@@ -11,7 +11,9 @@ internal data class ForumDraft(val sequence: Long, val data: JsonObject?) {
     val body: String get() = data?.get("reply")?.takeUnless { it.isJsonNull }?.asString.orEmpty()
     val supported: Boolean get() = data == null || (data.get("action")?.takeUnless { it.isJsonNull }?.asString == "reply" &&
         data.get("whisper")?.takeUnless { it.isJsonNull }?.asBoolean != true &&
-        data.get("archetypeId")?.takeUnless { it.isJsonNull }?.asString.let { it == null || it == "regular" })
+        data.get("archetypeId")?.takeUnless { it.isJsonNull }?.asString.let { it == null || it == "regular" } &&
+        listOf("sharedDraft", "sharedDraftId", "formTemplateId", "recipients", "targetRecipients")
+            .none { key -> data.get(key)?.takeUnless { it.isJsonNull }?.let { it.toString() !in setOf("false", "\"\"", "[]", "0") } == true })
     fun target(): ReplyTarget = ReplyTarget(
         data?.get("reply_to_post_number")?.takeUnless { it.isJsonNull }?.asInt,
         data?.get("reply_to_user")?.takeIf { it.isJsonObject }?.asJsonObject?.get("username")?.takeUnless { it.isJsonNull }?.asString.orEmpty(),

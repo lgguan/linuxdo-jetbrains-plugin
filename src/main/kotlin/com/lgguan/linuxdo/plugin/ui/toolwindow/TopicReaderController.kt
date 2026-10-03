@@ -111,7 +111,7 @@ internal class TopicReaderController(
                     "bookmarks" -> {
                         val user=LinuxDoAuthService.getInstance().currentUser?.username ?: error("请先登录")
                         val response=TopicReadingService.bookmarks(user,input.get("page").asInt,version).getOrThrow().asJsonObject
-                        TopicReadingService.bookmarkPage(response)
+                        TopicReadingService.bookmarkPage(response, user, input.get("page").asInt)
                     }
                     "subscription", "topicVote" -> ReaderWriteGate.shared.serialized {
                         val identity = Triple(key,version,0L)

@@ -61,7 +61,8 @@ class CreateTopicDialog private constructor(
     private val initialCategoryId: Int? = null,
     private val onTopicCreated: ((Post) -> Unit)?,
     private val draftSession: ForumDraftSession,
-    private val environment: TopicComposerEnvironment
+    private val environment: TopicComposerEnvironment,
+    private val requireExistingDraft: Boolean = false
 ) : DialogWrapper(project, true) {
 
     constructor(project: Project, initialCategoryId: Int? = null, onTopicCreated: ((Post) -> Unit)? = null) :
@@ -71,15 +72,19 @@ class CreateTopicDialog private constructor(
         fun open(project: Project, initialCategoryId: Int? = null, onTopicCreated: ((Post) -> Unit)? = null) {
             openEditor(project, initialCategoryId, onTopicCreated, ForumDraftSession(ForumDraftSession.NEW_TOPIC_KEY), ForumTopicComposerEnvironment)
         }
+        fun openDraft(project: Project, draftKey: String) {
+            require(draftKey.matches(Regex("new_topic(?:_[A-Za-z0-9_-]+)?")))
+            openEditor(project, null, null, ForumDraftSession(draftKey), ForumTopicComposerEnvironment, true)
+        }
         private fun openEditor(project: Project, initialCategoryId: Int?, onTopicCreated: ((Post) -> Unit)?,
-            session: ForumDraftSession, environment: TopicComposerEnvironment): CreateTopicDialog {
-            val registry = "${DiscourseApiClient.getBaseUrl()}:${session.version}:new_topic"
+            session: ForumDraftSession, environment: TopicComposerEnvironment, requireExisting: Boolean = false): CreateTopicDialog {
+            val registry = "${DiscourseApiClient.getBaseUrl()}:${com.lgguan.linuxdo.plugin.service.LinuxDoAuthService.getInstance().currentUser?.id}:${session.version}:${session.key}"
             val existing = editors[registry]
             if (existing != null && !existing.isDisposed) {
                 existing.window?.toFront()
                 return existing
             }
-            return CreateTopicDialog(project, initialCategoryId, onTopicCreated, session, environment).also { dialog ->
+            return CreateTopicDialog(project, initialCategoryId, onTopicCreated, session, environment, requireExisting).also { dialog ->
                 dialog.registryKey = registry
                 editors[registry] = dialog
                 dialog.show()
@@ -1074,7 +1079,14 @@ class CreateTopicDialog private constructor(
         setEditable(false)
         draftStatus.text = "正在读取论坛草稿…"
         draftWork({ draftSession.load() }) { draft ->
+            if(requireExistingDraft && draft.data == null) {
+                draftBlocked = true
+                draftStatus.text = "草稿已消失，请刷新我的草稿核对"
+                com.lgguan.linuxdo.plugin.service.PersonalContentService.getInstance().draftCleared(draftSession.key, draftSession.version)
+                return@draftWork
+            }
             if (!draft.isTopicDraft) {
+                if(requireExistingDraft) com.lgguan.linuxdo.plugin.service.PersonalContentService.getInstance().invalidate(com.lgguan.linuxdo.plugin.model.PersonalContentKind.DRAFTS, draftSession.version)
                 draftBlocked = true; setEditable(true)
                 draftStatus.text = "此草稿类型请在网页继续，插件不会改写"
                 draftRetry.text = "在网页打开"; draftRetry.isVisible = true
@@ -1177,6 +1189,9 @@ class CreateTopicDialog private constructor(
                 publishing = false; draftBusy = false
                 if (version != SessionEpoch.current) { draftBlocked = true; setEditable(true); updateValidation(); return@invokeLater }
                 result.onSuccess { (outcome, cleanup) ->
+                    val personal = com.lgguan.linuxdo.plugin.service.PersonalContentService.getInstance()
+                    personal.invalidate(com.lgguan.linuxdo.plugin.model.PersonalContentKind.TOPICS, version)
+                    personal.invalidate(com.lgguan.linuxdo.plugin.model.PersonalContentKind.DRAFTS, version)
                     if (cleanup.isFailure || cleanup.getOrNull() == ForumDraftSession.Cleanup.OTHER_CLIENT)
                         Messages.showInfoMessage(project, "提交已确认；服务器草稿未清理或已由其他客户端修改，请在网页检查。", "提交已确认")
                     close(OK_EXIT_CODE)

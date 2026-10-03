@@ -25,6 +25,14 @@ import java.io.IOException
 
 object DiscourseApiClient {
 
+    fun getPersonalContent(query: PersonalContentQuery, username: String, version: Long): Result<PersonalContentPage> = runCatching {
+        SessionEpoch.requireCurrent(version)
+        val base = getBaseUrl()
+        val response = readerGet(PersonalContentParser.path(query, username), version).getOrThrow().asJsonObject
+        SessionEpoch.requireCurrent(version)
+        PersonalContentParser.parse(response, query, base, username)
+    }
+
     private val gson = Gson()
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
@@ -364,13 +372,15 @@ object DiscourseApiClient {
     } }
 
     internal fun readDraft(key: String, expectedVersion: Long): Result<JsonObject> = runCatching {
+        require(key.matches(Regex("[A-Za-z0-9_-]{1,200}")))
         SessionEpoch.requireCurrent(expectedVersion)
-        val response = executeGet<JsonObject>("${getBaseUrl()}/drafts/$key.json").getOrThrow()
+        val response = executeGet<JsonObject>("${getBaseUrl()}/drafts/$key.json", expectedVersion).getOrThrow()
         SessionEpoch.requireCurrent(expectedVersion)
         response
     }
 
     internal fun writeDraft(key: String, sequence: Long, data: JsonObject?, expectedVersion: Long): Result<JsonObject> = runCatching {
+        require(key.matches(Regex("[A-Za-z0-9_-]{1,200}")))
         SessionEpoch.requireCurrent(expectedVersion)
         val csrf = getCsrfToken()
         SessionEpoch.requireCurrent(expectedVersion)

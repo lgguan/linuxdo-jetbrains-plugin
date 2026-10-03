@@ -1,0 +1,13 @@
+{
+  "passed": 6,
+  "checks": [
+    "title and name stay text without HTML execution",
+    "post floor and topic-only links preserve server targets",
+    "unknown target is disabled",
+    "continuation uses validated page rather than increment",
+    "failed continuation retries same page",
+    "empty terminal page stops loading"
+  ],
+  "transport": "isolated browser fixture",
+  "realForumWrites": 0
+}

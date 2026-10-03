@@ -63,6 +63,19 @@ class IssueListPanel(
         }
     }
     private val listScrollPane = JBScrollPane(topicList)
+    val personalContentPanel = PersonalContentPanel(project)
+    private val contentViews = JPanel(CardLayout())
+    private val forumContent = JPanel(BorderLayout())
+    private val forumControls = JPanel()
+    var personalView = false
+        private set
+    fun selectPersonalView(value: Boolean) {
+        personalView = value
+        forumControls.isVisible = !value
+        (contentViews.layout as CardLayout).show(contentViews, if(value) "MY" else "FORUM")
+        personalContentPanel.setActive(value)
+        revalidate(); repaint()
+    }
     private var displayedCondition: String? = null
 
     private val categoryComboBox = ComboBox<CategoryItem>()
@@ -336,9 +349,18 @@ class IssueListPanel(
 
         headerStack.add(row1)
         headerStack.add(Box.createVerticalStrut(JBUI.scale(4)))
-        headerStack.add(row2)
-        headerStack.add(Box.createVerticalStrut(JBUI.scale(4)))
-        headerStack.add(row3)
+        val views = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
+        val forum = JToggleButton("论坛", true)
+        val mine = JToggleButton("我的")
+        ButtonGroup().apply { add(forum); add(mine) }
+        forum.addActionListener { selectPersonalView(false) }
+        mine.addActionListener { selectPersonalView(true) }
+        views.add(forum); views.add(mine); headerStack.add(views)
+        forumControls.layout = BoxLayout(forumControls, BoxLayout.Y_AXIS)
+        forumControls.add(row2)
+        forumControls.add(Box.createVerticalStrut(JBUI.scale(4)))
+        forumControls.add(row3)
+        headerStack.add(forumControls)
 
         topPanel.add(headerStack, BorderLayout.CENTER)
         add(topPanel, BorderLayout.NORTH)
@@ -354,7 +376,7 @@ class IssueListPanel(
         centerContainer.add(scrollPane, "LIST")
         centerContainer.add(emptyStatePanel, "EMPTY")
 
-        add(JPanel(BorderLayout()).apply {
+        forumContent.add(JPanel(BorderLayout()).apply {
             add(loadStatusPanel, BorderLayout.NORTH)
             add(centerContainer, BorderLayout.CENTER)
         }, BorderLayout.CENTER)
@@ -362,7 +384,10 @@ class IssueListPanel(
         // Bottom: Load more button
         bottomPanel.add(loadMoreButton, BorderLayout.CENTER)
         loadMoreButton.addActionListener { loadMore() }
-        add(bottomPanel, BorderLayout.SOUTH)
+        forumContent.add(bottomPanel, BorderLayout.SOUTH)
+        contentViews.add(forumContent, "FORUM")
+        contentViews.add(personalContentPanel, "MY")
+        add(contentViews, BorderLayout.CENTER)
 
         updateAuthDisplay()
     }
@@ -1009,6 +1034,7 @@ class IssueListPanel(
         }
     }
     override fun dispose() {
+        personalContentPanel.dispose()
         authRefreshTimer.stop()
         disposed = true
         requestGeneration++

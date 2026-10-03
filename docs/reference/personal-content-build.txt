@@ -1,0 +1,5 @@
+Windows; JDK 21; desktopTests=true; offline
+Gradle test / buildPlugin / verifyPlugin / runPluginVerifier: BUILD SUCCESSFUL
+370 tests, 0 failures, 0 errors, 0 skips
+IDEA IU-262.10968.63: Compatible
+Plugin SHA256=7017509426e294cbe5c97dee87c57ce1bf4519d2cfeb6d4544bb36b4f631e1b9

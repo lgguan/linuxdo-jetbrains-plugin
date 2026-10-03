@@ -145,7 +145,7 @@ public final class NotificationIdeAcceptance implements ApplicationStarter {
     edt(()->{window.show();return null;});await("API Docs content",()->window.getContentManager().getContentCount()>0);
     return edt(()->((LinuxDoDocMainPanel)window.getContentManager().getContent(0).getComponent()).getIssueListPanel());
   }
-  private static void front(Project p)throws Exception {edt(()->{JFrame f=WindowManager.getInstance().getFrame(p);f.setAlwaysOnTop(true);f.toFront();f.requestFocus();return null;});await("active project frame",()->WindowManager.getInstance().getFrame(p).isActive());}
+  private static void front(Project p)throws Exception {edt(()->{JFrame f=WindowManager.getInstance().getFrame(p);if(!f.isActive()){f.setAlwaysOnTop(false);f.setAlwaysOnTop(true);f.toFront();f.requestFocus();}return null;});await("active project frame",()->WindowManager.getInstance().getFrame(p).isActive());}
   private static void click(Component component)throws Exception {
     Point center=edt(()->{Point point=component.getLocationOnScreen();point.translate(component.getWidth()/2,component.getHeight()/2);return point;});
     Robot robot=new Robot();robot.setAutoDelay(80);robot.mouseMove(center.x,center.y);robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);robot.waitForIdle();

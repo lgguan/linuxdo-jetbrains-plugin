@@ -51,12 +51,19 @@ class CommitReplyDialog private constructor(
     private val initialQuote: String?,
     private val onReplySuccess: ((com.lgguan.linuxdo.plugin.model.Post) -> Unit)? = null,
     private val draftSession: ReplyDraftSession = ReplyDraftSession(topicId),
-    private val environment: ReplyComposerEnvironment = ForumReplyComposerEnvironment
+    private val environment: ReplyComposerEnvironment = ForumReplyComposerEnvironment,
+    private val requireExistingDraft: Boolean = false
 ) : DialogWrapper(project, true) {
 
     companion object {
         private val editors = mutableMapOf<String, CommitReplyDialog>()
-        private fun editorKey(topicId: Long) = "${DiscourseApiClient.getBaseUrl()}:${com.lgguan.linuxdo.plugin.service.LinuxDoAuthService.getInstance().currentUser?.id}:$topicId"
+        private fun editorKey(topicId: Long) = "${DiscourseApiClient.getBaseUrl()}:${com.lgguan.linuxdo.plugin.service.LinuxDoAuthService.getInstance().currentUser?.id}:${SessionEpoch.current}:topic_$topicId"
+        fun openDraft(project: Project, topicId: Long) {
+            val key = editorKey(topicId)
+            editors[key]?.takeUnless { it.isDisposed }?.let { it.window?.toFront(); it.textArea.requestFocusInWindow(); return }
+            val dialog = CommitReplyDialog(project, topicId, 1, "", null, null, requireExistingDraft = true)
+            dialog.registryKey = key; editors[key] = dialog; dialog.show()
+        }
         fun open(project: Project, topicId: Long, floor: Int, author: String, postId: Long? = null,
                  quote: String? = null, onSuccess: ((com.lgguan.linuxdo.plugin.model.Post) -> Unit)? = null) {
             val key = editorKey(topicId)
@@ -652,9 +659,16 @@ class CommitReplyDialog private constructor(
 
     private fun restoreTarget(draft: ForumDraft): ReplyTarget {
         val restored = draft.target()
-        if (draft.supported && restored.floor == null && restored.postId != null) {
+        if (draft.supported && (restored.floor == null || restored.author.isBlank()) && restored.postId != null) {
             val post = environment.getPost(restored.postId)
             require(post.topicId == topicId) { "草稿回复对象不属于此话题" }
+            require(restored.floor == null || restored.floor == post.postNumber) { "草稿回复楼层无法确认" }
+            return ReplyTarget(post.postNumber, post.username, post.id)
+        }
+        if(requireExistingDraft && restored.floor != null && restored.author.isBlank()) {
+            val response = DiscourseApiClient.getTopicAroundPost(topicId, restored.floor).getOrThrow()
+            require(response.id == topicId) { "草稿回复话题无法确认" }
+            val post = response.postStream.posts.firstOrNull { it.postNumber == restored.floor } ?: error("草稿回复楼层已不可用")
             return ReplyTarget(post.postNumber, post.username, post.id)
         }
         return restored
@@ -666,6 +680,14 @@ class CommitReplyDialog private constructor(
         draftStatus.text = "正在读取论坛草稿…"
         draftWork({
             val draft = draftSession.load()
+            if(requireExistingDraft) {
+                com.lgguan.linuxdo.plugin.service.PersonalContentService.getInstance().invalidate(com.lgguan.linuxdo.plugin.model.PersonalContentKind.DRAFTS, draftSession.version)
+                if(draft.data == null) com.lgguan.linuxdo.plugin.service.PersonalContentService.getInstance().draftCleared(draftSession.key, draftSession.version)
+                require(draft.data != null) { "草稿已消失，请刷新我的草稿核对" }
+                require(draft.supported) { "草稿类型已改变，请在网页继续" }
+                val topic = DiscourseApiClient.readerGet("/t/$topicId.json?track_visit=false", draftSession.version).getOrThrow().asJsonObject
+                require(topic.get("id")?.asLong == topicId && topic.get("archetype")?.asString == "regular") { "无法确认普通话题，请在网页继续" }
+            }
             draft to restoreTarget(draft)
         }) { (draft, restored) ->
             if (!draft.supported) {
@@ -848,6 +870,9 @@ class CommitReplyDialog private constructor(
                     publishing = false
                     if (rejectChangedSession(session)) { draftBlocked = true; return@invokeLater }
                     result.onSuccess { (outcome, cleanup) ->
+                        val personal = com.lgguan.linuxdo.plugin.service.PersonalContentService.getInstance()
+                        personal.invalidate(com.lgguan.linuxdo.plugin.model.PersonalContentKind.REPLIES, session)
+                        personal.invalidate(com.lgguan.linuxdo.plugin.model.PersonalContentKind.DRAFTS, session)
                         LinuxDoLog.info("Reply successfully posted to topic #$topicId")
                         statusLabel.text = "🟢 回复发送成功！正在更新..."
                         if (cleanup.isFailure) Messages.showInfoMessage(project,

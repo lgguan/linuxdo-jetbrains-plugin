@@ -1,0 +1,9 @@
+{
+  "transport": "simulated / local fixtures",
+  "desktopTests": true,
+  "suites": 49,
+  "tests": 370,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0
+}

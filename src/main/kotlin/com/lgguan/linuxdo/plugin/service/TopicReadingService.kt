@@ -8,17 +8,18 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
 internal object TopicReadingService {
-    fun bookmarkPage(response: JsonObject): JsonObject {
+    fun bookmarkPage(response: JsonObject, username: String = "", page: Int = 0): JsonObject {
         val list=response.getAsJsonObject("user_bookmark_list") ?: response
         val items=list.getAsJsonArray("bookmarks")?.mapNotNull { value ->
-            val bookmark=value.asJsonObject
-            val topic=bookmark.get("topic_id")?.takeUnless { it.isJsonNull }?.asLong ?: return@mapNotNull null
+            val bookmark=com.lgguan.linuxdo.plugin.model.PersonalContentParser.bookmark(value.asJsonObject, DiscourseApiClient.getBaseUrl()) ?: return@mapNotNull null
             JsonObject().apply {
-                addProperty("title",bookmark.get("title")?.asString.orEmpty());addProperty("name",bookmark.get("name")?.takeUnless { it.isJsonNull }?.asString)
-                addProperty("topic",topic);addProperty("floor",bookmark.get("post_number")?.takeUnless { it.isJsonNull }?.asInt ?: 1)
+                addProperty("title",bookmark.title);addProperty("name",bookmark.detail)
+                addProperty("topic",bookmark.topicId);addProperty("floor",bookmark.floor)
+                addProperty("url",bookmark.webUrl)
             }
         }.orEmpty()
-        return JsonObject().apply { add("items",Gson().toJsonTree(items));addProperty("more",items.isNotEmpty() && !list.get("more_bookmarks_url")?.takeUnless { it.isJsonNull }?.asString.isNullOrBlank()) }
+        val next = PersonalContentParser.bookmarkNext(PersonalContentParser.string(list, "more_bookmarks_url"), DiscourseApiClient.getBaseUrl(), username, page)
+        return JsonObject().apply { add("items",Gson().toJsonTree(items));addProperty("more",next != null); addProperty("nextPage",next) }
     }
     fun revisionBodies(diff: com.google.gson.JsonObject?): Pair<String,String> {
         val markdown=diff?.get("side_by_side_markdown")?.asString.orEmpty()

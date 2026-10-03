@@ -63,6 +63,7 @@
         <applicationService serviceImplementation="com.lgguan.linuxdo.plugin.service.LinuxDoReadTrackingService"/>
         <applicationService serviceImplementation="com.lgguan.linuxdo.plugin.service.LinuxDoTopicService"/>
         <applicationService serviceImplementation="com.lgguan.linuxdo.plugin.service.LinuxDoAuthService"/>
+        <applicationService serviceImplementation="com.lgguan.linuxdo.plugin.service.PersonalContentService"/>
         <applicationConfigurable parentId="tools"
                                  instance="com.lgguan.linuxdo.plugin.config.LinuxDoSettingsConfigurable"
                                  id="com.lgguan.linuxdo.plugin.config.LinuxDoSettingsConfigurable"
