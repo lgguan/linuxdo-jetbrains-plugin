@@ -117,8 +117,9 @@ def host(args):
         archive.extractall(plugins)
     classes = output / "test-classes"
     ui = getattr(args, "ui", False)
-    starter = "IdeUiSmoke" if ui else "IdePluginSmoke"
-    command = "linuxdo-ui-smoke" if ui else "linuxdo-host-smoke"
+    notification_flow = getattr(args, "notifications_only", False)
+    starter = "NotificationIdeAcceptance" if notification_flow else "IdeUiSmoke" if ui else "IdePluginSmoke"
+    command = "linuxdo-notification-acceptance" if notification_flow else "linuxdo-ui-smoke" if ui else "linuxdo-host-smoke"
     compile_java(javac, os.pathsep.join([str(cef), cp]), classes, starter, *([] if ui else ["PluginCefSmoke"]))
     library = plugins / "linuxdo-host-smoke/lib/host-test.jar"
     library.parent.mkdir(parents=True)
@@ -172,6 +173,7 @@ def main():
             sub.add_argument("--output-base", help="Short directory for isolated IDE runs, avoiding Windows path limits")
             sub.add_argument("--native", action="store_true")
         if mode == "ui":
+            sub.add_argument("--notifications-only", action="store_true", help="Exercise notification entries in two real IDE project frames with isolated HTTP")
             sub.add_argument("--reader-only", action="store_true", help="Run only the production reader UI regression")
             sub.add_argument("--showcase", action="store_true", help="Capture current production UI with sample data for README and Marketplace")
             sub.add_argument("--forum-preview", action="store_true", help="Read-only live forum front-end preview check; no draft or post writes")

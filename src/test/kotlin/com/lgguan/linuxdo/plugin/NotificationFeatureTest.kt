@@ -105,7 +105,7 @@ class NotificationFeatureTest {
         val n4 = response.notifications[3]
         assertEquals("JoeyYin", n4.getDisplayAuthor())
         assertEquals("我复现看看", n4.getDisplayTitle())
-        assertEquals("发送了微回复", n4.getTypeActionLabel())
+        assertEquals("发来通知", n4.getTypeActionLabel()) // Numeric 34 is unconfirmed until the site supplies its type map.
         assertEquals(7777L, n4.topicId)
         assertEquals(3, n4.postNumber)
     }

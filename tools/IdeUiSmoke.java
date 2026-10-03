@@ -1223,6 +1223,102 @@ public class IdeUiSmoke implements ApplicationStarter {
     }
     throw new AssertionError("Timed out: first topic bridge ready");
   }
+  private static class NotificationFixture implements okhttp3.Interceptor {
+    final List<JsonObject> rows=new CopyOnWriteArrayList<>();
+    final java.util.concurrent.atomic.AtomicInteger writes=new java.util.concurrent.atomic.AtomicInteger();
+    volatile boolean failPage,failCount,failWrite;
+    volatile int pm=8;
+    NotificationFixture(){for(int i=75;i>0;i--)rows.add(item(i));}
+    JsonObject item(int id){return JsonParser.parseString("{\"id\":"+id+",\"notification_type\":2,\"read\":false,\"topic_id\":999997,\"post_number\":2,\"data\":{\"topic_title\":\"通知验收\",\"display_username\":\"fixture\"}}").getAsJsonObject();}
+    public okhttp3.Response intercept(okhttp3.Interceptor.Chain chain)throws IOException{
+      okhttp3.Request request=chain.request();String path=request.url().encodedPath(),body="{}";int code=200;
+      if(path.equals("/site.json"))body="{\"notification_types\":{\"boost\":43,\"assigned\":34}}";
+      else if(path.equals("/notifications.json")){
+        if(failPage)code=503;
+        else {
+          String filter=request.url().queryParameter("filter");int offset=Integer.parseInt(request.url().queryParameter("offset")),limit=Integer.parseInt(request.url().queryParameter("limit"));
+          List<JsonObject> matching=rows.stream().filter(r->filter==null || r.get("read").getAsBoolean()==filter.equals("read")).toList();
+          JsonArray page=new JsonArray();matching.stream().skip(offset).limit(limit).forEach(r->page.add(r.deepCopy()));
+          JsonObject data=new JsonObject();data.add("notifications",page);data.addProperty("total_rows_notifications",matching.size());data.addProperty("seen_notification_id",100);
+          data.addProperty("load_more_notifications","/notifications?offset="+(offset+limit)+"&limit="+limit+(filter==null?"":"&filter="+filter));body=data.toString();
+        }
+      } else if(path.equals("/notifications/totals.json")){
+        if(failCount)code=404;else body="{\"unread_notifications\":"+rows.stream().filter(r->!r.get("read").getAsBoolean()).count()+",\"unread_personal_messages\":"+pm+"}";
+      } else if(path.equals("/notifications/mark-read")){
+        writes.incrementAndGet();if(failWrite)code=403;
+        else {okio.Buffer buffer=new okio.Buffer();request.body().writeTo(buffer);String form=buffer.readUtf8();
+          for(JsonObject row:rows)if(form.isEmpty()||form.equals("id="+row.get("id").getAsInt()))row.addProperty("read",true);
+          if(form.isEmpty())pm=0;body="{\"success\":\"OK\"}";}
+      } else if(path.equals("/t/999996.json") || path.matches("/t/999997/\\d+\\.json"))code=404;
+      else return chain.proceed(request);
+      return new okhttp3.Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1).code(code).message("memory notification fixture")
+        .body(okhttp3.ResponseBody.create(body,okhttp3.MediaType.parse("application/json"))).build();
+    }
+  }
+  private static void notificationAcceptance(NotificationFixture fixture)throws Exception {
+    LinuxDoNotificationService service=LinuxDoNotificationService.Companion.getInstance();service.resetCircuitBreaker();
+    java.util.concurrent.atomic.AtomicBoolean done=new java.util.concurrent.atomic.AtomicBoolean();
+    service.refreshNotifications(items->{done.set(true);return Unit.INSTANCE;});await("notification head",done::get);
+    check("IDE_NOTIFICATION_ACCOUNT_TOTAL_EXCEEDS_PAGE",service.getUnreadCount()==83 && service.getRecentNotifications().size()==30);
+    NotificationListPanel panel=edt(()->new NotificationListPanel(project,null));
+    JFrame frame=edt(()->{JFrame f=new JFrame("通知验收（模拟数据）");f.setContentPane(panel);f.setSize(430,560);f.setLocation(140,90);f.setVisible(true);return f;});
+    DocViewerPanel reader=null;JFrame readerFrame=null;
+    com.lgguan.linuxdo.plugin.editor.LinuxDoTopicFileEditor topicEditor=null;
+    try {
+      done.set(false);service.loadMore(NotificationStatus.ALL,result->{done.set(true);return Unit.INSTANCE;});await("notification history",done::get);
+      check("IDE_NOTIFICATION_MORE_THAN_ONE_PAGE",edt(()->panel.getList().getModel().getSize()==60));
+      long selected=edt(()->{JList<DiscourseNotification> list=panel.getList();list.setSelectedIndex(33);Rectangle row=list.getCellBounds(31,31);((JScrollPane)field(panel,"scrollPane")).getViewport().setViewPosition(new Point(0,row.y+5));return list.getSelectedValue().getId();});
+      long anchor=edt(()->panel.getList().getModel().getElementAt(panel.getList().getFirstVisibleIndex()).getId());
+      fixture.rows.add(0,fixture.item(76));done.set(false);service.refreshNotifications(items->{done.set(true);return Unit.INSTANCE;});await("notification refresh",done::get);
+      check("IDE_NOTIFICATION_REFRESH_PRESERVES_SELECTION_AND_ANCHOR",edt(()->panel.getList().getSelectedValue().getId()==selected && panel.getList().getModel().getElementAt(panel.getList().getFirstVisibleIndex()).getId()==anchor));
+      showcaseCapture(frame,"notification-history");
+      edt(()->{Field category=NotificationListPanel.class.getDeclaredField("currentCategory");category.setAccessible(true);category.set(panel,NotificationListPanel.NotificationCategory.LIKES);panel.updateListItems();return null;});
+      check("IDE_NOTIFICATION_EMPTY_CATEGORY_EXPLAINS_LOADED_SCOPE",edt(()->((JLabel)field(panel,"emptyTitle")).getText().contains("可继续加载")));
+      edt(()->{Field category=NotificationListPanel.class.getDeclaredField("currentCategory");category.setAccessible(true);category.set(panel,NotificationListPanel.NotificationCategory.ALL);panel.updateListItems();return null;});
+      fixture.failPage=true;done.set(false);service.loadMore(NotificationStatus.ALL,result->{done.set(true);return Unit.INSTANCE;});await("notification failed page",done::get);
+      check("IDE_NOTIFICATION_FAILED_PAGE_RETAINS_HISTORY",edt(()->panel.getList().getModel().getSize()==61 && ((JButton)field(panel,"loadMoreBtn")).getText().contains("重试")));
+      fixture.failPage=false;edt(()->{((JButton)field(panel,"loadMoreBtn")).doClick();return null;});await("notification retry",()->panel.getList().getModel().getSize()==76);
+      fixture.failCount=true;done.set(false);service.refreshNotifications(items->{done.set(true);return Unit.INSTANCE;});await("stale notification totals",done::get);
+      check("IDE_NOTIFICATION_STALE_COUNT_VISIBLE",edt(()->((JLabel)field(panel,"unreadBadgeLabel")).getText().contains("未更新")));
+      fixture.failCount=false;fixture.failWrite=true;done.set(false);service.markAsRead(75L,ok->{done.set(true);return Unit.INSTANCE;});await("notification failed read",done::get);
+      check("IDE_NOTIFICATION_FAILED_READ_KEEPS_UNREAD",!service.getRecentNotifications().stream().filter(n->n.getId()==75).findFirst().orElseThrow().getRead());fixture.failWrite=false;
+      edt(()->{((JComboBox<?>)field(panel,"statusCombo")).setSelectedItem(NotificationStatus.UNREAD);return null;});
+      await("unread notification filter",()->panel.getList().getModel().getSize()==30);
+      check("IDE_NOTIFICATION_UNREAD_STATUS_FILTER",edt(()->panel.getList().getModel().getElementAt(0).getRead()==false));
+      edt(()->{((JComboBox<?>)field(panel,"statusCombo")).setSelectedItem(NotificationStatus.READ);return null;});
+      await("read notification filter",()->panel.getList().getModel().getSize()==0);
+      check("IDE_NOTIFICATION_READ_STATUS_FILTER",true);
+      edt(()->{((JComboBox<?>)field(panel,"statusCombo")).setSelectedItem(NotificationStatus.ALL);return null;});
+      await("all notification history retained",()->panel.getList().getModel().getSize()==76);
+      edt(()->{panel.getList().setSelectedIndex(0);((JButton)field(panel,"manualReadBtn")).doClick();return null;});
+      await("single manual read",()->fixture.rows.get(0).get("read").getAsBoolean());
+      check("IDE_NOTIFICATION_MANUAL_READ_BUTTON",true);
+      topicEditor=edt(()->new com.lgguan.linuxdo.plugin.editor.LinuxDoTopicFileEditor(project,
+        com.lgguan.linuxdo.plugin.editor.LinuxDoTopicVirtualFile.INSTANCE.create(999997,"通知定位验收",2)));
+      final com.lgguan.linuxdo.plugin.editor.LinuxDoTopicFileEditor activeEditor=topicEditor;
+      reader=(DocViewerPanel)topicEditor.getComponent();final DocViewerPanel visibleReader=reader;
+      readerFrame=edt(()->{JFrame f=new JFrame("通知定位验收（模拟正文）");f.setContentPane(visibleReader);f.setSize(900,700);f.setLocation(580,90);f.setVisible(true);return f;});
+      java.util.concurrent.atomic.AtomicReference<com.lgguan.linuxdo.plugin.editor.TopicOpenResult> result=new java.util.concurrent.atomic.AtomicReference<>();
+      int before=fixture.writes.get();done.set(false);
+      edt(()->{activeEditor.selectNotify();activeEditor.openTarget(2,outcome->{result.set(outcome);if(outcome==com.lgguan.linuxdo.plugin.editor.TopicOpenResult.SUCCESS)service.markAsRead(75L,ok->{done.set(true);return Unit.INSTANCE;});return Unit.INSTANCE;});return null;});
+      check("IDE_NOTIFICATION_FRESH_OPEN_HAS_NO_EARLY_WRITE",fixture.writes.get()==before);
+      await("notification body confirmed then read",done::get);
+      check("IDE_NOTIFICATION_FRESH_OPEN_ACKNOWLEDGES_BEFORE_READ",result.get()==com.lgguan.linuxdo.plugin.editor.TopicOpenResult.SUCCESS && fixture.writes.get()==before+1);
+      result.set(null);edt(()->{activeEditor.jumpToFloor(1,outcome->{result.set(outcome);return Unit.INSTANCE;});return null;});await("reused reader floor acknowledgement",()->result.get()!=null);
+      check("IDE_NOTIFICATION_REUSED_READER_CONFIRMS_POSITION",result.get()==com.lgguan.linuxdo.plugin.editor.TopicOpenResult.SUCCESS);
+      result.set(null);edt(()->{activeEditor.openTarget(null,outcome->{result.set(outcome);return Unit.INSTANCE;});return null;});await("body only acknowledgement",()->result.get()!=null);
+      check("IDE_NOTIFICATION_WITHOUT_FLOOR_CONFIRMS_BODY",result.get()==com.lgguan.linuxdo.plugin.editor.TopicOpenResult.SUCCESS);
+      result.set(null);edt(()->{activeEditor.jumpToFloor(777,outcome->{result.set(outcome);return Unit.INSTANCE;});return null;});await("missing notification floor",()->result.get()!=null);
+      check("IDE_NOTIFICATION_MISSING_FLOOR_NO_WRITE",result.get()==com.lgguan.linuxdo.plugin.editor.TopicOpenResult.FAILURE && fixture.writes.get()==before+1);
+      result.set(null);edt(()->{visibleReader.loadTopic(999996,null);activeEditor.openTarget(null,outcome->{result.set(outcome);return Unit.INSTANCE;});return null;});await("missing notification topic",()->result.get()!=null);
+      check("IDE_NOTIFICATION_HTTP_404_NO_WRITE",result.get()==com.lgguan.linuxdo.plugin.editor.TopicOpenResult.FAILURE && fixture.writes.get()==before+1);
+      done.set(false);service.markAsRead(null,ok->{done.set(true);return Unit.INSTANCE;});await("all notification read",done::get);
+      check("IDE_NOTIFICATION_MARK_ALL_INCLUDES_UNLOADED",fixture.rows.stream().allMatch(r->r.get("read").getAsBoolean()) && service.getUnreadCount()==0);
+    } finally {
+      final com.lgguan.linuxdo.plugin.editor.LinuxDoTopicFileEditor closing=topicEditor;final JFrame closingFrame=readerFrame;
+      edt(()->{Disposer.dispose(panel);frame.dispose();if(closing!=null)Disposer.dispose(closing);if(closingFrame!=null)closingFrame.dispose();return null;});
+    }
+  }
   private static void reader() throws Exception {
     JsonObject topic = new JsonObject(); topic.addProperty("id", 999999); topic.addProperty("title", "IDE 文档阅读验收");
     topic.addProperty("highest_post_number", 12); topic.addProperty("posts_count", 12);
@@ -1268,7 +1364,8 @@ public class IdeUiSmoke implements ApplicationStarter {
     java.util.concurrent.atomic.AtomicBoolean rejectBoost=new java.util.concurrent.atomic.AtomicBoolean(false);
     java.util.concurrent.atomic.AtomicReference<JsonObject> boostPayload=new java.util.concurrent.atomic.AtomicReference<>();
     settings.setNetworkMode("JAVA_ONLY");
-    clientField.set(null,previousClient.newBuilder().cookieJar(readerCredentials).addInterceptor(chain->{
+    NotificationFixture notificationFixture=new NotificationFixture();
+    clientField.set(null,previousClient.newBuilder().cookieJar(readerCredentials).addInterceptor(notificationFixture).addInterceptor(chain->{
       okhttp3.Request request=chain.request();String path=request.url().encodedPath();String response;int responseCode=200;
       if(request.method().equals("GET")&&(path.equals("/session/csrf")||path.equals("/session/csrf.json")))response="{\"csrf\":\"reader-fixture-csrf\"}";
       else if(request.method().equals("GET")&&path.equals("/t/999997.json"))response=firstOpenTopic.toString();
@@ -1304,8 +1401,9 @@ public class IdeUiSmoke implements ApplicationStarter {
     credentialsField.set(auth,readerCredentials);
     auth.setCurrentUserDirectly(GSON.fromJson("{\"id\":999998,\"username\":\"fixture_reader\"}",UserInfo.class));
     firstOpenReadAcceptance();
+    notificationAcceptance(notificationFixture);
     DocViewerPanel panel = edt(() -> new DocViewerPanel(project));
-    JFrame frame = edt(() -> { JFrame f = new JFrame("Linux Do reader acceptance"); f.setContentPane(panel); f.setSize(960, 700); f.setLocation(120, 100); f.setVisible(true); return f; });
+    JFrame frame = edt(() -> { JFrame f = new JFrame("Linux Do reader acceptance"); f.setContentPane(panel); f.setSize(960, 700); f.setLocation(120, 100); f.setAlwaysOnTop(true); f.setVisible(true); return f; });
     LinuxDoJSQuery query = null;
     try {
       await("IDE native reader available", () -> field(panel, "jbCefBrowser") != null);
@@ -1471,9 +1569,13 @@ public class IdeUiSmoke implements ApplicationStarter {
       java.util.concurrent.atomic.AtomicInteger sends,java.util.concurrent.atomic.AtomicInteger deletes,java.util.concurrent.atomic.AtomicBoolean reject,
       java.util.concurrent.atomic.AtomicReference<JsonObject> payload) throws Exception {
     evaluate(browser,query,replies,"(()=>{window.boostPatchTrace=[];const patch=linuxDoPagination.patch;linuxDoPagination.patch=function(html){const body=document.querySelector('#floor-2 .post-content'),before={top:body.getBoundingClientRect().top,scroll:scrollY,floor:this.currentFloor()};patch.call(this,html);boostPatchTrace.push({before,after:{top:body.getBoundingClientRect().top,scroll:scrollY,floor:this.currentFloor()}});};return {ok:true}})()");
-    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 [data-boost-open]').scrollIntoView({block:'center'});return {ok:true}})()");Thread.sleep(400);
+    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 [data-boost-open]').scrollIntoView({behavior:'instant',block:'center'});return {ok:true}})()");Thread.sleep(400);
     evaluate(browser,query,replies,"(()=>{window.boostBody=document.querySelector('#floor-2 .post-content');window.boostTop=boostBody.getBoundingClientRect().top;document.querySelector('#floor-2 [data-boost-open]').click();return {ok:true}})()");
-    await("native Boost permissions and catalog",()->evaluate(browser,query,replies,"(()=>{if(!document.querySelector('.boost-popover'))document.querySelector('#floor-2 [data-boost-open]').click();return {ok:!!document.querySelector('.boost-status')?.textContent.includes('Enter')}})()").get("ok").getAsBoolean());
+    try {
+      await("native Boost permissions and catalog",()->evaluate(browser,query,replies,"(()=>{if(!document.querySelector('.boost-popover')){document.querySelector('#floor-2 [data-boost-open]').scrollIntoView({behavior:'instant',block:'center'});document.querySelector('#floor-2 [data-boost-open]').click();}return {ok:!!document.querySelector('.boost-status')?.textContent.includes('Enter')}})()").get("ok").getAsBoolean());
+    } catch (Throwable error) {
+      report.println("BOOST_DIAGNOSTIC="+evaluate(browser,query,replies,"({status:document.querySelector('.boost-status')?.textContent,popover:!!document.querySelector('.boost-popover'),postTop:document.querySelector('#floor-2').getBoundingClientRect().top,scroll:scrollY,height:innerHeight})"));throw error;
+    }
     check("IDE_BOOST_FLOAT_AT_FLOOR",evaluate(browser,query,replies,"(()=>{const r=document.querySelector('.boost-popover').getBoundingClientRect();return {ok:r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=document.querySelector('.topic-navigation').getBoundingClientRect().top}})()").get("ok").getAsBoolean());
     check("IDE_BOOST_UNICODE_GRAPHEME_COUNTER",evaluate(browser,query,replies,"(()=>{const i=document.querySelector('.boost-input');i.value='👨‍👩‍👧‍👦👍🏻é:tada:';i.dispatchEvent(new Event('input'));const s=linuxDoBoostStats(i.value);return {ok:s.visible===4&&s.emoji===3}})()").get("ok").getAsBoolean());
     int initial=sends.get();

@@ -256,6 +256,22 @@
         else if (refreshQueued) refresh();
         else schedule();
     }
+    let openTargetRequest = null;
+    function acknowledgeOpen(target, success) {
+        const pending = openTargetRequest;
+        if (!pending) return;
+        requestAnimationFrame(() => {
+            if (pending !== openTargetRequest) return;
+            const body = target?.querySelector('.post-content');
+            const rect = body?.getBoundingClientRect();
+            const floor = Number(target?.dataset.postNumber) || 0;
+            const displayed = !!(success && body?.isConnected && rect.height > 0 && rect.width > 0 &&
+                rect.bottom > 0 && rect.top < innerHeight && document.visibilityState !== 'hidden');
+            if (success && pending.floor !== null && pending.floor !== floor) return;
+            openTargetRequest = null;
+            window.intellijBridge?.targetOpened?.(config.key, pending.id, floor, displayed);
+        });
+    }
     function reveal(target, message, fromFloor) {
         if (fromFloor && Number(target.dataset.postNumber) !== fromFloor) {
             returnFloor = fromFloor;
@@ -266,6 +282,7 @@
         refreshMessage = message;
         update();
         target.scrollIntoView({behavior: 'instant', block: 'start'});
+        acknowledgeOpen(target, true);
         floorSlider.value = target.dataset.postNumber;
         progressLabel.textContent = '#' + target.dataset.postNumber + ' / ' + highestFloor;
         floorSlider.setAttribute('aria-valuetext', progressLabel.textContent);
@@ -285,6 +302,7 @@
             if (window.showDocToast) window.showDocToast(refreshMessage);
             return false;
         }
+        if (openTargetRequest && openTargetRequest.floor !== null && openTargetRequest.floor !== floor) acknowledgeOpen(null, false);
         prefetchArmed = false;
         navigationVersion++;
         if (busy || refreshing || jumping) { queuedFloor = floor; return true; }
@@ -430,6 +448,15 @@
                 }
             }
         },
+        openTarget(key, id, floor) {
+            if (key !== config.key) return;
+            openTargetRequest = {id, floor};
+            if (floor === null) acknowledgeOpen(entries().find(el => {
+                const rect = el.querySelector('.post-content')?.getBoundingClientRect();
+                return rect && rect.bottom > 0 && rect.top < innerHeight;
+            }), true);
+            else if (!jump(floor)) acknowledgeOpen(null, false);
+        },
         jumped(key, requestId, ids, html, error, highest, retryAfterSeconds) {
             if (key !== config.key || !jumping || jumping.id !== requestId) return;
             rateLimited(retryAfterSeconds);
@@ -450,6 +477,7 @@
                 if (!error && target && request.restoreTop !== undefined) window.scrollBy(0,target.getBoundingClientRect().top-request.restoreTop);
                 else if (!error && target) reveal(target, '已定位到 #' + request.floor + ' 楼', request.fromFloor);
                 else {
+                    acknowledgeOpen(null, false);
                     refreshMessage = '无法加载 #' + request.floor + ' 楼，楼层可能不存在或无权查看；可点击跳转重试';
                     update();
                     if (window.showDocToast) window.showDocToast(refreshMessage);

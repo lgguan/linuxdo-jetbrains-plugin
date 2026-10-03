@@ -1,0 +1,89 @@
+{
+  "date": "2026-10-03",
+  "version": "1.0.2",
+  "releaseState": "unpublished workspace changes",
+  "plugin": {
+    "path": "build/distributions/linuxdo-jetbrains-plugin-1.0.2.zip",
+    "sha256": "4df3cf7b49764d647693a3c2d973e2ca3bdf265f18835959e02c9c2898d9c579"
+  },
+  "unit": {
+    "tests": 360,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "newNotificationWorkflowTests": 21,
+  "ide": {
+    "version": "IntelliJ IDEA Ultimate 2026.2.3 / IU-262.10968.63",
+    "os": "Windows x64",
+    "checks": 77,
+    "notificationChecks": [
+      "IDE_NOTIFICATION_ACCOUNT_TOTAL_EXCEEDS_PAGE",
+      "IDE_NOTIFICATION_MORE_THAN_ONE_PAGE",
+      "IDE_NOTIFICATION_REFRESH_PRESERVES_SELECTION_AND_ANCHOR",
+      "IDE_NOTIFICATION_EMPTY_CATEGORY_EXPLAINS_LOADED_SCOPE",
+      "IDE_NOTIFICATION_FAILED_PAGE_RETAINS_HISTORY",
+      "IDE_NOTIFICATION_STALE_COUNT_VISIBLE",
+      "IDE_NOTIFICATION_FAILED_READ_KEEPS_UNREAD",
+      "IDE_NOTIFICATION_UNREAD_STATUS_FILTER",
+      "IDE_NOTIFICATION_READ_STATUS_FILTER",
+      "IDE_NOTIFICATION_MANUAL_READ_BUTTON",
+      "IDE_NOTIFICATION_FRESH_OPEN_HAS_NO_EARLY_WRITE",
+      "IDE_NOTIFICATION_FRESH_OPEN_ACKNOWLEDGES_BEFORE_READ",
+      "IDE_NOTIFICATION_REUSED_READER_CONFIRMS_POSITION",
+      "IDE_NOTIFICATION_WITHOUT_FLOOR_CONFIRMS_BODY",
+      "IDE_NOTIFICATION_MISSING_FLOOR_NO_WRITE",
+      "IDE_NOTIFICATION_HTTP_404_NO_WRITE",
+      "IDE_NOTIFICATION_MARK_ALL_INCLUDES_UNLOADED"
+    ],
+    "passed": true,
+    "transport": "in-memory HTTP; synthetic credentials and content",
+    "finalZipMatchesTestedExtractedFiles": true,
+    "projectWindowAcceptance": {
+      "checks": 38,
+      "passed": true,
+      "projects": 2,
+      "entry": "Actual notification button/list clicks and registered IDE Notification actions",
+      "transport": "memory-only HTTP, synthetic accounts",
+      "scope": [
+        "actual FileEditorManager new/reused readers",
+        "cross-window counts and request coalescing",
+        "Boost43, badge, unknown, private message",
+        "403,404,missing floor",
+        "tab deselection cancellation and retry",
+        "boss key close/restore and retry",
+        "account change pending open and stale balloon actions",
+        "native JCEF callback disconnect and recovery retry"
+      ],
+      "report": "docs/reference/notification-project-ide-ui.txt",
+      "finalZipMatchesTestedExtractedFiles": true
+    },
+    "totalNativeChecks": 115
+  },
+  "browser": {
+    "notificationAcknowledgements": 11,
+    "existingNavigation": 16,
+    "passed": true,
+    "isolatedContext": true
+  },
+  "pluginVerifier": {
+    "version": "1.410",
+    "target": "IU-262.10968.63",
+    "verdict": "Compatible"
+  },
+  "site": {
+    "getRequestsInFinalCheck": 6,
+    "realWriteRequests": 0,
+    "verifiedBoostType": 43,
+    "assignedType": 34,
+    "sampleNotifications": 16,
+    "ordinaryUnread": 0,
+    "personalMessageUnread": 0,
+    "totalForumGetRequestsInThisTask": 9
+  },
+  "notPerformed": [
+    "real account mark-read writes",
+    "real account login form submission",
+    "macOS and Linux native IDE acceptance"
+  ]
+}

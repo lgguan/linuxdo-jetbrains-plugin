@@ -14,7 +14,9 @@ import com.lgguan.linuxdo.plugin.common.Constants
 import com.lgguan.linuxdo.plugin.common.LinuxDoLog
 import com.lgguan.linuxdo.plugin.config.LinuxDoSettingsState
 import com.lgguan.linuxdo.plugin.editor.LinuxDoEditorOpener
-import com.lgguan.linuxdo.plugin.model.DiscourseNotification
+import com.lgguan.linuxdo.plugin.model.*
+import com.lgguan.linuxdo.plugin.net.SessionEpoch
+import com.lgguan.linuxdo.plugin.net.StaleSessionException
 import com.lgguan.linuxdo.plugin.net.CloudflareChallengeException
 import com.lgguan.linuxdo.plugin.net.RateLimitException
 import java.awt.Frame
@@ -39,20 +41,54 @@ import java.util.concurrent.TimeUnit
  */
 class LinuxDoNotificationService(
     private val auth: LinuxDoAuthService = LinuxDoAuthService.getInstance(),
-    private val fetch: () -> Result<List<DiscourseNotification>> = { DiscourseApiClient.getNotifications() },
-    initialize: Boolean = true
+    private val fetch: (NotificationQuery, Long) -> Result<NotificationListResponse> = { query, version -> DiscourseApiClient.getNotifications(query, version) },
+    initialize: Boolean = true,
+    private val fetchTotals: (Long) -> Result<NotificationTotals> = DiscourseApiClient::getNotificationTotals,
+    private val writeRead: (Long?, Long) -> Result<Boolean> = DiscourseApiClient::markNotificationRead,
+    private val fetchTypes: (Long) -> Result<Map<String, Int>> = DiscourseApiClient::getNotificationTypes,
+    private val baseUrl: () -> String = DiscourseApiClient::getBaseUrl
 ) : Disposable {
     @Volatile private var disposed = false
 
     private val listenerLifetime = com.intellij.openapi.util.Disposer.newDisposable()
 
     @Volatile
-    var unreadCount: Int = 0
+    var unreadCount: Int = -1
         private set
 
     val recentNotifications = CopyOnWriteArrayList<DiscourseNotification>()
     private val countListeners = CopyOnWriteArrayList<(Int) -> Unit>()
     private val notificationListeners = CopyOnWriteArrayList<(List<DiscourseNotification>) -> Unit>()
+
+    @Volatile var countState = NotificationCountState()
+        private set
+    @Volatile var lastReadError: String? = null
+        private set
+    private val stateLock = Any()
+    private val requestLock = Any()
+    private val flights = mutableMapOf<Pair<Long, NotificationQuery>, MutableList<(Result<NotificationHistory>) -> Unit>>()
+    private val histories = mutableMapOf<NotificationStatus, NotificationHistory>()
+    private var typesVersion: Long? = null
+    private var cacheVersion = SessionEpoch.current
+
+    fun history(status: NotificationStatus): NotificationHistory = synchronized(stateLock) {
+        ensureSession()
+        histories[status] ?: NotificationHistory()
+    }
+
+    private fun ensureSession() {
+        if (cacheVersion != SessionEpoch.current) {
+            cacheVersion = SessionEpoch.current
+            histories.clear()
+            recentNotifications.clear()
+            lastKnownNotificationIds.clear()
+            isInitialized = false
+            typesVersion = null
+            lastReadError = null
+            countState = NotificationCountState()
+            unreadCount = -1
+        }
+    }
 
     private val lastKnownNotificationIds = Collections.synchronizedSet(HashSet<Long>())
     @Volatile
@@ -96,17 +132,29 @@ class LinuxDoNotificationService(
         if (initialize) try {
             // 1. 监听登录状态自适应启停
             auth.addAuthListener(listenerLifetime) { user ->
+                val sessionChanged = synchronized(stateLock) {
+                    val changed = cacheVersion != SessionEpoch.current
+                    ensureSession()
+                    changed
+                }
+                updateUnreadCount(countState.totals?.total ?: -1)
+                notifyNotificationListeners(recentNotifications.toList())
                 if (user != null) {
-                    resetCircuitBreaker()
+                    if (sessionChanged) resetCircuitBreaker()
                     startPolling()
                     refreshNotifications()
                 } else {
                     stopPolling()
                     resetCircuitBreaker()
-                    recentNotifications.clear()
-                    lastKnownNotificationIds.clear()
-                    isInitialized = false
-                    updateUnreadCount(0)
+                    synchronized(stateLock) {
+                        histories.clear()
+                        recentNotifications.clear()
+                        lastKnownNotificationIds.clear()
+                        isInitialized = false
+                        countState = NotificationCountState()
+                        lastReadError = null
+                    }
+                    updateUnreadCount(-1)
                     notifyNotificationListeners(emptyList())
                 }
             }
@@ -268,7 +316,7 @@ class LinuxDoNotificationService(
 
         // 2. 执行网络请求拉取通知
         try {
-            doFetchNotifications()
+            refreshNotifications()
         } catch (t: Throwable) {
             LinuxDoLog.warn("Error during doFetchNotifications: ${t.message}")
         }
@@ -368,98 +416,136 @@ class LinuxDoNotificationService(
     // ==========================================
 
     fun refreshNotifications(onComplete: ((List<DiscourseNotification>) -> Unit)? = null) {
-        val requestVersion = com.lgguan.linuxdo.plugin.net.SessionEpoch.current
-        if (!auth.isLoggedIn) {
-            updateUnreadCount(0)
-            onComplete?.invoke(emptyList())
+        requestPage(NotificationQuery()) { onComplete?.invoke(recentNotifications.toList()) }
+    }
+
+    fun refresh(status: NotificationStatus, onComplete: (Result<NotificationHistory>) -> Unit = {}) =
+        requestPage(NotificationQuery(status), onComplete)
+
+    fun loadMore(status: NotificationStatus, onComplete: (Result<NotificationHistory>) -> Unit = {}) {
+        val cached = history(status)
+        val query = cached.failedQuery ?: cached.next ?: if (!cached.loaded) NotificationQuery(status) else null
+        if (query == null) { onComplete(Result.success(cached)); return }
+        requestPage(query, onComplete)
+    }
+
+    /** Polling and every window join the same in-flight request. Network and read writes are serialized. */
+    private fun requestPage(query: NotificationQuery, onComplete: (Result<NotificationHistory>) -> Unit) {
+        val version = SessionEpoch.current
+        if (disposed || !auth.isLoggedIn || isCircuitBroken()) {
+            onComplete(Result.failure(IllegalStateException(if (isCircuitBroken()) "通知请求正在冷却，稍后重试" else "请先登录")))
             return
         }
-
-        // 处于熔断保护期时直接拦截网络发包
-        if (isCircuitBroken()) {
-            val remaining = getRemainingCircuitBreakerSeconds()
-            LinuxDoLog.warn("refreshNotifications skipped: circuit breaker active for ${remaining}s")
-            onComplete?.invoke(recentNotifications.toList())
+        val userId = auth.currentUser?.id ?: run {
+            onComplete(Result.failure(StaleSessionException()))
             return
         }
+        val key = version to query
+        synchronized(flights) {
+            flights[key]?.let { it.add(onComplete); return }
+            flights[key] = mutableListOf(onComplete)
+        }
+        val work = {
+            val result = synchronized(requestLock) { readPage(query, version, userId) }
+            val callbacks = synchronized(flights) { flights.remove(key).orEmpty().toList() }
+            dispatch { callbacks.forEach { callback -> runCatching { callback(result) } } }
+        }
+        ApplicationManager.getApplication()?.executeOnPooledThread { work() } ?: work()
+    }
 
-        val app = ApplicationManager.getApplication()
-        if (app != null) {
-            app.executeOnPooledThread {
-                val list = doFetchNotifications()
-                val epoch = requestVersion
-        app.invokeLater {
-            if (disposed || epoch != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
-                    onComplete?.invoke(list)
-                }
+    private fun readPage(query: NotificationQuery, version: Long, userId: Long): Result<NotificationHistory> {
+        if (disposed || version != SessionEpoch.current || auth.currentUser?.id != userId) return Result.failure(StaleSessionException())
+        if (isCircuitBroken()) return Result.failure(IllegalStateException("通知请求正在冷却，稍后重试"))
+        // One configuration read per account; unconfirmed plugin IDs use generic text and a web target.
+        if (typesVersion != version) {
+            val types = runCatching { fetchTypes(version).getOrThrow() }
+            SessionEpoch.ifCurrent(version) {
+                types.getOrNull()?.let { NotificationTypes.configure(version, it) }
+                typesVersion = version
             }
-        } else {
-            val list = doFetchNotifications()
-            onComplete?.invoke(list)
+            handleFailure(types.exceptionOrNull())
+        }
+        if (isCircuitBroken() || version != SessionEpoch.current || auth.currentUser?.id != userId) return Result.failure(IllegalStateException("通知请求已暂停"))
+        val page = runCatching { fetch(query, version).getOrThrow() }
+        val counts = if (query.offset == 0 && !isCircuitBroken() && version == SessionEpoch.current &&
+            page.exceptionOrNull() !is RateLimitException && page.exceptionOrNull() !is CloudflareChallengeException)
+            runCatching { fetchTotals(version).getOrThrow() } else null
+        return SessionEpoch.ifCurrent(version) {
+            synchronized(stateLock) {
+                ensureSession()
+                if (disposed || auth.currentUser?.id != userId) return@synchronized Result.failure<NotificationHistory>(StaleSessionException())
+                lastFetchTimestamp = System.currentTimeMillis()
+                counts?.let {
+                    countState = if (it.isSuccess) NotificationCountState(it.getOrThrow()) else countState.copy(stale = true)
+                    handleFailure(it.exceptionOrNull())
+                    updateUnreadCount(countState.totals?.total ?: -1)
+                }
+                val previous = histories[query.status] ?: NotificationHistory()
+                val result = page.mapCatching { previous.merge(query, it, baseUrl()) }
+                if (result.isSuccess) {
+                    val updated = result.getOrThrow()
+                    histories[query.status] = updated
+                    // Refresh read flags across loaded filters without dropping history.
+                    val flags = page.getOrThrow().notifications.associateBy { it.id }
+                    histories.replaceAll { status, value ->
+                        val removedUnread = value.items.count { !it.read && flags[it.id]?.read == true }
+                        value.copy(items = value.items.map { flags[it.id] ?: it }.filter(status::accepts),
+                            next = if (status == NotificationStatus.UNREAD && removedUnread > 0)
+                                value.next?.let { it.copy(offset = (it.offset - removedUnread).coerceAtLeast(0)) } else value.next)
+                    }
+                    if (query.status == NotificationStatus.ALL) {
+                        val head = page.getOrThrow().notifications
+                        val newUnread = if (isInitialized && query.offset == 0) head.filter { it.id !in lastKnownNotificationIds && !it.read } else emptyList()
+                        if (query.offset == 0) isInitialized = true
+                        head.forEach { lastKnownNotificationIds.add(it.id) }
+                        newUnread.forEach { pushIdeNotification(it) }
+                    }
+                    recentNotifications.clear()
+                    recentNotifications.addAll(histories[NotificationStatus.ALL]?.items.orEmpty())
+                } else {
+                    handleFailure(result.exceptionOrNull())
+                    histories[query.status] = previous.copy(error = "通知加载失败，已有内容已保留；请重试", failedQuery = query)
+                }
+                notifyNotificationListeners(recentNotifications.toList())
+                result
+            }
+        } ?: Result.failure(StaleSessionException())
+    }
+
+    private fun handleFailure(error: Throwable?) {
+        when (error) {
+            is RateLimitException -> triggerCircuitBreaker("论坛访问过于频繁 (HTTP 429)", error.retryAfterSeconds)
+            is CloudflareChallengeException -> triggerCircuitBreaker("Cloudflare 安全验证拦截", 600L)
         }
     }
 
-    private fun doFetchNotifications(): List<DiscourseNotification> {
-        if (disposed || isCircuitBroken()) {
-            return recentNotifications.toList()
+    private fun dispatch(action: () -> Unit) {
+        val app = ApplicationManager.getApplication()
+        if (app != null) app.invokeLater { if (!disposed) action() } else if (!disposed) action()
+    }
+
+    /** Both popup and IDE balloon wait for the reader to acknowledge the displayed target. */
+    fun openNotification(project: Project, notification: DiscourseNotification, onComplete: ((Boolean) -> Unit)? = null) {
+        val version = SessionEpoch.current
+        val userId = auth.currentUser?.id
+        if (userId == null || disposed) { onComplete?.invoke(false); return }
+        val target = NotificationTypes.topicTarget(notification)
+        if (target == null) {
+            com.intellij.ide.BrowserUtil.browse(NotificationTypes.webTarget(notification, baseUrl()))
+            onComplete?.invoke(false)
+            return
         }
-
-        if (disposed || !auth.isLoggedIn) return emptyList()
-        val epoch = com.lgguan.linuxdo.plugin.net.SessionEpoch.current
-        val result = fetch()
-        return com.lgguan.linuxdo.plugin.net.SessionEpoch.ifCurrent(epoch) {
-        if (disposed) return@ifCurrent emptyList()
-        lastFetchTimestamp = System.currentTimeMillis()
-
-        if (result.isSuccess) {
-            val list = result.getOrNull() ?: emptyList()
-            val isFirstRun = !isInitialized
-            isInitialized = true
-
-            // 增量检测真正新到的未读通知
-            val newUnread = if (!isFirstRun) {
-                list.filter { it.id !in lastKnownNotificationIds && !it.read }
+        LinuxDoEditorOpener.openTopic(project, target, notification.getDisplayTitle(), notification.postNumber) { outcome ->
+            if (outcome == com.lgguan.linuxdo.plugin.editor.TopicOpenResult.SUCCESS && version == SessionEpoch.current && auth.currentUser?.id == userId && !disposed) {
+                if (!notification.read) markAsRead(notification.id, onComplete) else onComplete?.invoke(true)
             } else {
-                emptyList()
-            }
-
-            for (item in list) {
-                lastKnownNotificationIds.add(item.id)
-            }
-
-            recentNotifications.clear()
-            recentNotifications.addAll(list)
-
-            val unread = list.count { !it.read }
-            updateUnreadCount(unread)
-            notifyNotificationListeners(list)
-
-            // 推送 IDE 原生气泡
-            if (newUnread.isNotEmpty()) {
-                for (notification in newUnread) {
-                    pushIdeNotification(notification)
+                if (version == SessionEpoch.current && auth.currentUser?.id == userId) {
+                    lastReadError = "通知目标未成功显示，未读状态已保留；可重试打开或手动标读"
+                    notifyNotificationListeners(recentNotifications.toList())
                 }
+                onComplete?.invoke(false)
             }
-            list
-        } else {
-            val error = result.exceptionOrNull()
-            LinuxDoLog.warn("doFetchNotifications failed: ${error?.message}")
-
-            if (error is RateLimitException) {
-                triggerCircuitBreaker(
-                    reason = "论坛访问过于频繁 (HTTP 429)",
-                    cooldownSeconds = error.retryAfterSeconds
-                )
-            } else if (error is CloudflareChallengeException) {
-                triggerCircuitBreaker(
-                    reason = "Cloudflare 安全验证拦截",
-                    cooldownSeconds = 600L
-                )
-            }
-
-            recentNotifications.toList()
         }
-            } ?: emptyList()
     }
 
     fun pushIdeNotification(notification: DiscourseNotification, project: Project? = null) {
@@ -494,22 +580,19 @@ class LinuxDoNotificationService(
                     NotificationType.INFORMATION
                 )
 
-                if (notification.topicId != null) {
-                    ideNotification.addAction(
-                        NotificationAction.createSimpleExpiring("查看帖子 (View Post)") {
-                            val p = targetProject ?: ProjectManager.getInstance().openProjects.firstOrNull()
-                            if (p != null) {
-                                LinuxDoEditorOpener.openTopic(
-                                    p,
-                                    notification.topicId,
-                                    notification.getDisplayTitle(),
-                                    postNumber = notification.postNumber
-                                )
-                                markAsRead(notification.id)
-                            }
-                        }
-                    )
-                }
+                ideNotification.addAction(
+                    NotificationAction.createSimple("查看通知 / 重试") {
+                        val p = targetProject ?: ProjectManager.getInstance().openProjects.firstOrNull()
+                        if (epoch != SessionEpoch.current) ideNotification.expire()
+                        else if (p != null) openNotification(p, notification) { if (it) ideNotification.expire() }
+                    }
+                )
+                if (!notification.read) ideNotification.addAction(
+                    NotificationAction.createSimple("手动标为已读 / 重试") {
+                        if (epoch != SessionEpoch.current) ideNotification.expire()
+                        else markAsRead(notification.id) { if (it) ideNotification.expire() }
+                    }
+                )
 
                 ideNotification.notify(targetProject)
                 LinuxDoLog.info("Pushed IDE notification: id=${notification.id}")
@@ -521,23 +604,52 @@ class LinuxDoNotificationService(
 
     fun markAsRead(notificationId: Long? = null, onComplete: ((Boolean) -> Unit)? = null) {
         if (disposed || !auth.isLoggedIn || isCircuitBroken()) { onComplete?.invoke(false); return }
-        val version = com.lgguan.linuxdo.plugin.net.SessionEpoch.current
+        val version = SessionEpoch.current
+        val userId = auth.currentUser?.id
         val work = {
-            val result = if (version == com.lgguan.linuxdo.plugin.net.SessionEpoch.current)
-                DiscourseApiClient.markNotificationRead(notificationId, version) else Result.success(false)
-            com.lgguan.linuxdo.plugin.net.SessionEpoch.ifCurrent(version) {
-                if (!disposed) {
-                    if (result.getOrDefault(false)) {
-                        recentNotifications.filter { notificationId == null || it.id == notificationId }.forEach { it.read = true }
-                        updateUnreadCount(recentNotifications.count { !it.read })
-                        notifyNotificationListeners(recentNotifications.toList())
-                    } else (result.exceptionOrNull() as? RateLimitException)?.let { triggerCircuitBreaker("HTTP 429", it.retryAfterSeconds) }
-                    com.lgguan.linuxdo.plugin.common.invokeLoginUiLater {
-                        if (!disposed && version == com.lgguan.linuxdo.plugin.net.SessionEpoch.current) onComplete?.invoke(result.getOrDefault(false))
+            synchronized(requestLock) {
+                val result = if (version == SessionEpoch.current && auth.currentUser?.id == userId && userId != null && !disposed && !isCircuitBroken())
+                    runCatching { writeRead(notificationId, version).getOrThrow() } else Result.failure(StaleSessionException())
+                SessionEpoch.ifCurrent(version) {
+                    synchronized(stateLock) {
+                        ensureSession()
+                        if (!disposed && auth.currentUser?.id == userId) {
+                            if (result.getOrDefault(false)) {
+                                val affected = histories.values.flatMap { it.items }.filter { notificationId == null || it.id == notificationId }
+                                    .distinctBy { it.id }.map { it.copy(read = true) }
+                                val ids = affected.map { it.id }.toSet()
+                                histories.replaceAll { status, value ->
+                                    val removed = value.items.count { !it.read && it.id in ids }
+                                    value.copy(items = (value.items.map { if (it.id in ids) it.copy(read = true) else it } +
+                                        if (status == NotificationStatus.READ) affected else emptyList()).distinctBy { it.id }.filter(status::accepts).sortedByDescending { it.id },
+                                        next = when {
+                                            status == NotificationStatus.UNREAD && notificationId == null -> null
+                                            status == NotificationStatus.UNREAD -> value.next?.let { it.copy(offset = (it.offset - removed).coerceAtLeast(0)) }
+                                            status == NotificationStatus.READ -> NotificationQuery(status)
+                                            else -> value.next
+                                        }, error = null, failedQuery = null)
+                                }
+                                recentNotifications.replaceAll { if (notificationId == null || it.id == notificationId) it.copy(read = true) else it }
+                                lastReadError = null
+                            } else lastReadError = "标读失败，未读状态已保留；可手动重试"
+                            handleFailure(result.exceptionOrNull())
+                            notifyNotificationListeners(recentNotifications.toList())
+                        }
                     }
                 }
+                if (result.getOrDefault(false) && version == SessionEpoch.current && auth.currentUser?.id == userId && !disposed) {
+                    val totals = if (!isCircuitBroken()) runCatching { fetchTotals(version).getOrThrow() } else Result.failure(IllegalStateException("请求正在冷却"))
+                    SessionEpoch.ifCurrent(version) {
+                        if (!disposed && auth.currentUser?.id == userId) {
+                            countState = if (totals.isSuccess) NotificationCountState(totals.getOrThrow()) else countState.copy(stale = true)
+                            handleFailure(totals.exceptionOrNull())
+                            updateUnreadCount(countState.totals?.total ?: -1)
+                            notifyNotificationListeners(recentNotifications.toList())
+                        }
+                    }
+                }
+                dispatch { onComplete?.invoke(result.getOrDefault(false) && version == SessionEpoch.current && auth.currentUser?.id == userId) }
             }
-            Unit
         }
         ApplicationManager.getApplication()?.executeOnPooledThread { work() } ?: work()
     }

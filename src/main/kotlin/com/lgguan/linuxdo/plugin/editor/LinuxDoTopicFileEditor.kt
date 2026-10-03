@@ -21,9 +21,11 @@ class LinuxDoTopicFileEditor(
         viewerPanel.loadTopic(LinuxDoTopicVirtualFile.topicId(topicFile), LinuxDoTopicVirtualFile.targetPostNumber(topicFile))
     }
 
-    fun jumpToFloor(postNumber: Int) {
-        viewerPanel.jumpToPostNumber(postNumber)
+    fun jumpToFloor(postNumber: Int, onComplete: ((TopicOpenResult) -> Unit)? = null) {
+        viewerPanel.jumpToPostNumber(postNumber, onComplete)
     }
+
+    fun openTarget(postNumber: Int?, onComplete: (TopicOpenResult) -> Unit) = viewerPanel.openTarget(postNumber, onComplete)
 
     override fun getComponent(): JComponent = viewerPanel
 

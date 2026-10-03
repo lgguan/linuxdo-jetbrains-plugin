@@ -209,13 +209,13 @@ class MarketplaceSafetyTest {
     @Test fun `late notifications cannot repopulate an account after logout`() {
         val auth = LinuxDoAuthService(PersistentCookieJar(false).apply { injectCookie("_t", "test") })
         auth.setCurrentUserDirectly(UserInfo(7, "user"))
-        val service = LinuxDoNotificationService(auth, {
+        val service = LinuxDoNotificationService(auth, { _, _ ->
             auth.logout()
-            Result.success(listOf(DiscourseNotification(1, notificationType = 1, read = false)))
-        }, initialize = false)
+            Result.success(com.lgguan.linuxdo.plugin.model.NotificationListResponse(listOf(DiscourseNotification(1, notificationType = 1, read = false))))
+        }, initialize = false, fetchTypes = { Result.success(emptyMap()) })
         try {
             service.refreshNotifications()
-            assertEquals(0, service.unreadCount)
+            assertEquals(-1, service.unreadCount)
             assertTrue(service.recentNotifications.isEmpty())
         } finally { service.dispose() }
     }

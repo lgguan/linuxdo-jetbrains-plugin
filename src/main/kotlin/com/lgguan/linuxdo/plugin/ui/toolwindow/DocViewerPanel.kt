@@ -8,6 +8,8 @@ import com.lgguan.linuxdo.plugin.service.LinuxDoTopicService
 import com.lgguan.linuxdo.plugin.theme.TopicDocumentRenderer
 import com.lgguan.linuxdo.plugin.theme.EditorColorSchemeAdapter
 import com.lgguan.linuxdo.plugin.editor.LinuxDoEditorOpener
+import com.lgguan.linuxdo.plugin.editor.TopicOpenRequest
+import com.lgguan.linuxdo.plugin.editor.TopicOpenResult
 import com.lgguan.linuxdo.plugin.ui.dialog.CommitReplyDialog
 import com.lgguan.linuxdo.plugin.ui.dialog.LoginAuthDialog
 import com.intellij.ide.BrowserUtil
@@ -65,6 +67,45 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
     private var requestedFloor: Int? = null
     @Volatile private var loadGeneration = 0L
     private var pageKey = ""
+    private var openRequest: TopicOpenRequest? = null
+    private var openDeadline = 0L
+    private val openTimer = javax.swing.Timer(250) {
+        openRequest?.let {
+            if (it.version != com.lgguan.linuxdo.plugin.net.SessionEpoch.current ||
+                com.lgguan.linuxdo.plugin.service.LinuxDoBossKeyService.getInstance(project).isHidden)
+                finishOpen(TopicOpenResult.CANCELLED)
+            else if (System.currentTimeMillis() >= openDeadline) finishOpen(TopicOpenResult.FAILURE)
+        }
+    }
+
+    private fun finishOpen(result: TopicOpenResult) {
+        val pending = openRequest
+        openRequest = null
+        openTimer.stop()
+        pending?.finish(result)
+    }
+
+    fun openTarget(postNumber: Int?, onComplete: (TopicOpenResult) -> Unit) {
+        if (disposed || project.isDisposed) { onComplete(TopicOpenResult.CANCELLED); return }
+        if (postNumber != null && postNumber < 1) { onComplete(TopicOpenResult.FAILURE); return }
+        finishOpen(TopicOpenResult.CANCELLED)
+        if (readingVersion != com.lgguan.linuxdo.plugin.net.SessionEpoch.current ||
+            (currentTopic == null && (requestedFloor != postNumber || topicTask?.isDone != false))) {
+            requestedTopicId?.let { loadTopic(it, postNumber) }
+        }
+        openRequest = TopicOpenRequest(com.lgguan.linuxdo.plugin.net.SessionEpoch.current, postNumber, onComplete)
+        openDeadline = System.currentTimeMillis() + 45_000
+        openTimer.start()
+        if (currentTopic != null) confirmOpenInBrowser()
+    }
+
+    private fun confirmOpenInBrowser() {
+        val pending = openRequest ?: return
+        val browser = jbCefBrowser ?: return // No browser acknowledgement means no automatic mark-read.
+        val gson = com.google.gson.Gson()
+        browser.cefBrowser.executeJavaScript(
+            "window.linuxDoPagination && window.linuxDoPagination.openTarget(${gson.toJson(pageKey)},${gson.toJson(pending.id)},${gson.toJson(pending.floor)});", "", 0)
+    }
     private var loadingPosts = false
     private var refreshingPosts = false
     private var loadingFloor = false
@@ -100,7 +141,11 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
     fun setSelected(selected: Boolean) {
         editorSelected = selected
         if (selected && isShowing) jbCefBrowser?.component?.requestFocusInWindow()
-        if (!selected) { readingClock.sample(emptySet(), false); flushReading() }
+        if (!selected) {
+            finishOpen(TopicOpenResult.CANCELLED)
+            readingClock.sample(emptySet(), false)
+            flushReading()
+        }
     }
     fun preferredFocusedComponent(): javax.swing.JComponent = jbCefBrowser?.component ?: this
     private fun flushReading() {
@@ -205,7 +250,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                     removeAll()
                     add(browser.component, BorderLayout.CENTER)
                     currentTopic?.let { renderTopic(it, currentPostNumber) }
-                        ?: requestedTopicId?.let { loadTopic(it, requestedFloor) }
+                        ?: requestedTopicId?.let { if (topicTask?.isDone != false) loadTopic(it, requestedFloor) }
                         ?: loadPlaceholder("Select an issue / document from the list to view.")
                     revalidate()
                     repaint()
@@ -230,6 +275,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
     }
 
     private fun showBrowserFailure(reason: String) {
+        finishOpen(TopicOpenResult.FAILURE)
         removeAll()
         add(JPanel(java.awt.GridBagLayout()).apply {
             val box = JPanel().apply {
@@ -421,6 +467,23 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                                 readerController.handle(key,java.util.UUID.randomUUID().toString(),"like",id,input,callbackEpoch)
                         }
                     }
+                    "targetOpened" -> {
+                        val key = json?.get("key")?.asString.orEmpty()
+                        val requestId = json?.get("requestId")?.asString.orEmpty()
+                        val floor = json?.get("floor")?.asInt ?: 0
+                        val success = json?.get("success")?.asBoolean == true
+                        ApplicationManager.getApplication().invokeLater {
+                            if (disposed || project.isDisposed || key != pageKey || callbackPage != browser.documentTrust.token ||
+                                callbackGeneration != loadGeneration || callbackEpoch != readingVersion) return@invokeLater
+                            val pending = openRequest ?: return@invokeLater
+                            if (requestId != pending.id) return@invokeLater
+                            openRequest = null
+                            openTimer.stop()
+                            pending.acknowledge(requestId, com.lgguan.linuxdo.plugin.net.SessionEpoch.current, floor,
+                                isShowing && browser.component.isShowing && browser.runtime.isUsable &&
+                                    !com.lgguan.linuxdo.plugin.service.LinuxDoBossKeyService.getInstance(project).isHidden, success)
+                        }
+                    }
                     "navigationReturn" -> {
                         val key = json?.get("key")?.asString
                         val floor = json?.get("floor")?.asInt ?: 0
@@ -554,6 +617,9 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
             override fun onLoadEnd(b: CefBrowser?, frame: CefFrame?, httpStatusCode: Int) {
                 if (!disposed && frame?.isMain == true && browser.isCurrentDocument(frame.url)) {
                     frame.executeJavaScript(buildBridgeScript(query), frame.url, 0)
+                    ApplicationManager.getApplication().invokeLater {
+                        if (!disposed && browser.isCurrentDocument(frame.url)) confirmOpenInBrowser()
+                    }
                 }
             }
         }, browser.cefBrowser)
@@ -569,6 +635,9 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
 
     private fun buildBridgeScript(query: JBCefJSQuery): String = """
                         window.intellijBridge = {
+                            targetOpened: function(key, requestId, floor, success) {
+                                ${query.inject(" JSON.stringify({ action: 'targetOpened', key: key, requestId: requestId, floor: floor, success: success }) ")}
+                            },
                             readerAction: function(key, requestId, operation, postId, input) {
                                 ${query.inject(" JSON.stringify({ action: 'readerAction', key: key, requestId: requestId, operation: operation, postId: postId, input: input }) ")}
                             },
@@ -679,6 +748,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
 
     fun loadTopic(topicId: Long, targetPostNumber: Int? = null) {
         if (disposed) return
+        finishOpen(TopicOpenResult.CANCELLED)
         flushReading()
         readingClock = com.lgguan.linuxdo.plugin.service.ReadingClock()
         readingScroll = -1L
@@ -723,6 +793,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
             },
             onError = { error ->
                 if (disposed || generation != loadGeneration || readingVersion != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@loadTopicDetail
+                finishOpen(TopicOpenResult.FAILURE)
                 val msg = error.message ?: ""
                 val isChallenge = error is com.lgguan.linuxdo.plugin.net.CloudflareChallengeException
                 if (isChallenge) {
@@ -908,11 +979,14 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
             jbCefBrowser?.loadHTML(html)
             fallbackPane?.text = html
         } catch (e: Throwable) {
+            finishOpen(TopicOpenResult.FAILURE)
             loadPlaceholder("Error rendering specification: ${e.message ?: "Unknown error"}")
         }
     }
 
-    fun jumpToPostNumber(postNumber: Int) {
+    fun jumpToPostNumber(postNumber: Int, onComplete: ((TopicOpenResult) -> Unit)? = null) {
+        if (onComplete != null) { openTarget(postNumber, onComplete); return }
+        finishOpen(TopicOpenResult.CANCELLED)
         ApplicationManager.getApplication().invokeLater {
             if (disposed || project.isDisposed || postNumber < 1) return@invokeLater
             if (jbCefBrowser == null || currentTopic == null) {
@@ -976,6 +1050,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
     }
 
     override fun dispose() {
+        finishOpen(TopicOpenResult.CANCELLED)
         appearanceTimer.stop()
         topicTask?.cancel(true)
         backgroundTasks.dispose()

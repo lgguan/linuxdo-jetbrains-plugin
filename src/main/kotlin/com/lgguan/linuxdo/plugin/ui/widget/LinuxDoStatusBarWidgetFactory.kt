@@ -41,12 +41,12 @@ class LinuxDoStatusBarWidget(private val project: Project) : CustomStatusBarWidg
     @Volatile private var disposed = false
     private var notifications: LinuxDoNotificationService? = null
 
-    private val label = JLabel("[Docs: 0]")
+    private val label = JLabel("[Docs: ?]")
 
     init {
         label.border = JBUI.Borders.empty(0, 4)
         label.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-        label.toolTipText = "Linux Do (API Docs): 0 unread notifications"
+        label.toolTipText = "未读数量暂不可用"
 
         label.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
@@ -88,11 +88,11 @@ class LinuxDoStatusBarWidget(private val project: Project) : CustomStatusBarWidg
         if (unreadCount > 0) {
             label.text = "[Docs: $unreadCount]"
             label.foreground = JBColor.RED
-            label.toolTipText = "Linux Do (API Docs): $unreadCount unread issues/mentions"
+            label.toolTipText = notifications?.countState?.label ?: "未读数量暂不可用"
         } else {
-            label.text = "[Docs]"
+            label.text = if (unreadCount < 0) "[Docs: ?]" else "[Docs]"
             label.foreground = JBColor.GRAY
-            label.toolTipText = "Linux Do (API Docs): All caught up"
+            label.toolTipText = notifications?.countState?.label ?: "未读数量暂不可用"
         }
     }
 

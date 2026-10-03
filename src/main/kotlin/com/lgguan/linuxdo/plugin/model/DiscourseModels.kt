@@ -247,8 +247,9 @@ data class GroupedSearchResult(
 
 data class NotificationListResponse(
     @SerializedName("notifications") val notifications: List<DiscourseNotification> = emptyList(),
-    @SerializedName("total_rows_notifications") val totalRows: Int = 0,
-    @SerializedName("seen_notification_id") val seenNotificationId: Long? = null
+    @SerializedName("total_rows_notifications") val totalRows: Int? = null,
+    @SerializedName("seen_notification_id") val seenNotificationId: Long? = null,
+    @SerializedName("load_more_notifications") val loadMoreNotifications: String? = null
 )
 
 data class DiscourseNotification(
@@ -282,18 +283,18 @@ data class DiscourseNotification(
     }
 
     fun getTypeActionLabel(): String {
-        return when (notificationType) {
-            1 -> "提到了你"
-            2 -> "回复了你"
-            3 -> "引用了你的发言"
-            4 -> "编辑了帖子"
-            5 -> "赞了你的帖子"
-            6 -> "发来私信"
-            9 -> "发布了新回复"
-            11 -> "链接了你的帖子"
-            12 -> "授予你新徽章"
-            19 -> if ((data?.count ?: 0) > 1) "等 ${(data?.count ?: 0)} 人赞了你的帖子" else "赞了你的帖子"
-            34 -> "发送了微回复"
+        return when (NotificationTypes.name(notificationType)) {
+            "mentioned", "group_mentioned" -> "提到了你"
+            "replied" -> "回复了你"
+            "quoted" -> "引用了你的发言"
+            "edited" -> "编辑了帖子"
+            "liked", "reaction" -> "赞了你的帖子"
+            "private_message", "invited_to_private_message" -> "发来私信"
+            "posted" -> "发布了新回复"
+            "linked" -> "链接了你的帖子"
+            "granted_badge" -> "授予你新徽章"
+            "liked_consolidated" -> if ((data?.count ?: 0) > 1) "等 ${(data?.count ?: 0)} 人赞了你的帖子" else "赞了你的帖子"
+            "boost", "boosted", "boosted_consolidated" -> "发送了微回复"
             else -> "发来通知"
         }
     }

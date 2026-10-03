@@ -772,15 +772,15 @@ class IssueListPanel(
                 notificationButton.text = if (count > 99) "99+" else "$count"
                 notificationButton.foreground = JBColor(0xCF222E, 0xF85149)
                 notificationButton.icon = AllIcons.Toolwindows.NotificationsNew
-                notificationButton.toolTipText = "Linux Do 通知 ($count 条未读) - 点击查看"
+                notificationButton.toolTipText = "Linux Do 通知：${LinuxDoNotificationService.getInstance().countState.label} - 点击查看"
                 notificationButton.preferredSize = Dimension(JBUI.scale(42), CONTROL_HEIGHT)
                 notificationButton.minimumSize = Dimension(JBUI.scale(42), CONTROL_HEIGHT)
                 notificationButton.maximumSize = Dimension(JBUI.scale(48), CONTROL_HEIGHT)
             } else {
-                notificationButton.text = ""
+                notificationButton.text = if (count < 0) "?" else ""
                 notificationButton.foreground = JBColor.foreground()
                 notificationButton.icon = AllIcons.Toolwindows.Notifications
-                notificationButton.toolTipText = "Linux Do 通知 - 点击查看"
+                notificationButton.toolTipText = "Linux Do 通知：${LinuxDoNotificationService.getInstance().countState.label} - 点击查看"
                 notificationButton.preferredSize = Dimension(CONTROL_HEIGHT, CONTROL_HEIGHT)
                 notificationButton.minimumSize = Dimension(CONTROL_HEIGHT, CONTROL_HEIGHT)
                 notificationButton.maximumSize = Dimension(CONTROL_HEIGHT, CONTROL_HEIGHT)

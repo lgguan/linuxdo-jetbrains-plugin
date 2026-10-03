@@ -2,9 +2,7 @@ package com.lgguan.linuxdo.plugin.ui.dialog
 
 import com.intellij.icons.AllIcons
 import com.intellij.ide.BrowserUtil
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.popup.JBPopup
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.ui.JBColor
@@ -12,9 +10,9 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
-import com.lgguan.linuxdo.plugin.editor.LinuxDoEditorOpener
-import com.lgguan.linuxdo.plugin.model.DiscourseNotification
-import com.lgguan.linuxdo.plugin.service.LinuxDoAuthService
+import com.lgguan.linuxdo.plugin.model.*
+import com.lgguan.linuxdo.plugin.net.SessionEpoch
+import com.lgguan.linuxdo.plugin.api.DiscourseApiClient
 import com.lgguan.linuxdo.plugin.service.LinuxDoNotificationService
 import java.awt.*
 import java.awt.event.MouseAdapter
@@ -35,9 +33,23 @@ class NotificationListPanel(
         SYSTEM("系统/徽章")
     }
 
+    private val service = LinuxDoNotificationService.getInstance()
+    private var currentStatus = NotificationStatus.ALL
+    private val statusCombo = JComboBox(NotificationStatus.entries.toTypedArray())
+    private val emptyTitle = JBLabel("暂无相关通知")
+    private val messageLabel = JBLabel("").apply { font = font.deriveFont(11f); foreground = JBColor.GRAY }
+    private val loadMoreBtn = JButton("加载更多").apply { addActionListener { loadMore() } }
+    private val manualReadBtn = JButton("选中项标读").apply {
+        isEnabled = false
+        toolTipText = "手动将选中通知标为已读；网页跳转不会自动标读"
+        addActionListener { list.selectedValue?.let { markRead(it.id) } }
+    }
+    private var loading = false
+    private var itemsVersion = SessionEpoch.current
     private var currentCategory = NotificationCategory.ALL
     private val notificationModel = DefaultListModel<DiscourseNotification>()
     val list = JBList(notificationModel)
+    private val scrollPane = JBScrollPane(list).apply { border = JBUI.Borders.empty() }
 
     private val titleLabel = JBLabel("通知").apply {
         font = font.deriveFont(Font.BOLD, 13f)
@@ -53,9 +65,10 @@ class NotificationListPanel(
         isFocusable = false
         addActionListener { reloadNotifications() }
     }
-    private val markAllReadBtn = JButton(AllIcons.Actions.Checked).apply {
-        toolTipText = "全部标为已读"
-        preferredSize = Dimension(JBUI.scale(26), JBUI.scale(24))
+    private val markAllReadBtn = JButton("账号全部标读", AllIcons.Actions.Checked).apply {
+        toolTipText = "将账号全部通知标为已读（包含未加载的通知）"
+        font = font.deriveFont(11f)
+        preferredSize = Dimension(JBUI.scale(110), JBUI.scale(24))
         margin = JBUI.insets(1)
         isFocusable = false
         addActionListener { markAllAsRead() }
@@ -77,23 +90,15 @@ class NotificationListPanel(
         setupFooter()
 
         val centerPanel = JPanel(BorderLayout())
-        contentDeck.add(JBScrollPane(list).apply {
-            border = JBUI.Borders.empty()
-        }, "LIST")
+        contentDeck.add(scrollPane, "LIST")
         contentDeck.add(emptyPanel, "EMPTY")
         centerPanel.add(contentDeck, BorderLayout.CENTER)
         add(centerPanel, BorderLayout.CENTER)
 
-        // Listen for live updates
-        val listener: (List<DiscourseNotification>) -> Unit = {
-            ApplicationManager.getApplication().invokeLater {
-                if (disposed || project.isDisposed) return@invokeLater
-                updateListItems()
-            }
-        }
-        LinuxDoNotificationService.getInstance().addNotificationListener(listenerLifetime, listener)
-
+        service.addNotificationListener(listenerLifetime) { updateListItems() }
+        service.addCountListener(listenerLifetime) { updateListItems() }
         updateListItems()
+        reloadNotifications()
     }
 
     private fun setupHeader() {
@@ -139,9 +144,20 @@ class NotificationListPanel(
             tabBox.add(tabBtn)
         }
 
-        val topStack = JPanel(BorderLayout())
-        topStack.add(tabBox, BorderLayout.SOUTH)
-        (getComponent(0) as? JPanel)?.add(tabBox, BorderLayout.SOUTH)
+        val filters = JPanel(BorderLayout()).apply {
+            add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                add(JBLabel("状态"))
+                add(statusCombo)
+                add(JBLabel("类别仅筛选已加载通知").apply { foreground = JBColor.GRAY; font = font.deriveFont(11f) })
+            }, BorderLayout.NORTH)
+            add(tabBox, BorderLayout.SOUTH)
+        }
+        statusCombo.addActionListener {
+            currentStatus = statusCombo.selectedItem as NotificationStatus
+            updateListItems()
+            reloadNotifications()
+        }
+        (getComponent(0) as? JPanel)?.add(filters, BorderLayout.SOUTH)
     }
 
     private fun setupList() {
@@ -149,10 +165,12 @@ class NotificationListPanel(
         list.cellRenderer = NotificationCellRenderer()
         list.emptyText.text = "暂无通知"
 
+        list.addListSelectionListener { manualReadBtn.isEnabled = !loading && list.selectedValue?.read == false }
         list.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
+                if (e.button != MouseEvent.BUTTON1) return
                 val index = list.locationToIndex(e.point)
-                if (index in 0 until notificationModel.size()) {
+                if (index in 0 until notificationModel.size() && list.getCellBounds(index, index)?.contains(e.point) == true) {
                     val item = notificationModel.getElementAt(index)
                     handleNotificationClick(item)
                 }
@@ -168,138 +186,113 @@ class NotificationListPanel(
             anchor = GridBagConstraints.CENTER
         }
         val emptyIcon = JBLabel(AllIcons.General.Information)
-        val emptyTitle = JBLabel("暂无相关通知").apply {
-            foreground = JBColor.GRAY
-            font = font.deriveFont(Font.PLAIN, 12f)
-        }
+        emptyTitle.foreground = JBColor.GRAY
+        emptyTitle.font = emptyTitle.font.deriveFont(Font.PLAIN, 12f)
         emptyPanel.add(emptyIcon, gbc)
         gbc.gridy++
         emptyPanel.add(emptyTitle, gbc)
     }
 
     private fun setupFooter() {
-        val footer = JPanel(BorderLayout()).apply {
-            border = JBUI.Borders.empty(6, 12)
-            background = JBColor(0xF6F8FA, 0x1F2328)
-        }
-        val tipLabel = JBLabel("💡 点击通知可直接跳转至对应楼层").apply {
-            font = font.deriveFont(Font.PLAIN, 11f)
-            foreground = JBColor.GRAY
-        }
-        val webBtn = JBLabel("网页通知 ↗").apply {
-            font = font.deriveFont(Font.PLAIN, 11f)
-            foreground = JBColor(0x0969DA, 0x58A6FF)
-            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-            addMouseListener(object : MouseAdapter() {
-                override fun mouseClicked(e: MouseEvent?) {
-                    val user = LinuxDoAuthService.getInstance().currentUser?.username
-                    val url = if (!user.isNullOrBlank()) {
-                        "https://linux.do/u/$user/notifications"
-                    } else {
-                        "https://linux.do/notifications"
-                    }
-                    BrowserUtil.browse(url)
-                    onClose?.invoke()
-                }
+        val footer = JPanel(BorderLayout()).apply { border = JBUI.Borders.empty(6, 10) }
+        footer.add(messageLabel, BorderLayout.NORTH)
+        footer.add(JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+            add(loadMoreBtn)
+            add(manualReadBtn)
+            add(JButton("网页通知 ↗").apply {
+                addActionListener { BrowserUtil.browse("${DiscourseApiClient.getBaseUrl()}/notifications") }
             })
-        }
-        footer.add(tipLabel, BorderLayout.WEST)
-        footer.add(webBtn, BorderLayout.EAST)
+        }, BorderLayout.CENTER)
         add(footer, BorderLayout.SOUTH)
     }
 
     private fun handleNotificationClick(item: DiscourseNotification) {
-        // Mark as read immediately
-        LinuxDoNotificationService.getInstance().markAsRead(item.id)
-
-        // Jump to target topic & floor
-        if (item.topicId != null) {
-            LinuxDoEditorOpener.openTopic(
-                project = project,
-                topicId = item.topicId,
-                topicTitle = item.getDisplayTitle(),
-                postNumber = item.postNumber
-            )
-            onClose?.invoke()
-        } else if (item.data?.badgeId != null) {
-            val badgeUrl = "https://linux.do/badges/${item.data.badgeId}"
-            BrowserUtil.browse(badgeUrl)
-            onClose?.invoke()
+        if (itemsVersion != SessionEpoch.current) { updateListItems(); return }
+        service.openNotification(project, item) { success ->
+            if (!disposed && !project.isDisposed) {
+                if (success) onClose?.invoke() else updateListItems()
+            }
         }
     }
 
     private fun reloadNotifications() {
-        val notifService = LinuxDoNotificationService.getInstance()
-        if (notifService.isCircuitBroken()) {
-            val remainingSec = notifService.getRemainingCircuitBreakerSeconds()
-            val min = (remainingSec + 59) / 60
-            Messages.showWarningDialog(
-                this,
-                "通知请求正在冷却中 (还剩约 $min 分钟)。\n冷却结束后自动恢复轮询。",
-                "通知请求已暂停"
-            )
-            return
-        }
-        refreshBtn.isEnabled = false
-        notifService.refreshNotifications {
-            ApplicationManager.getApplication().invokeLater {
-                if (disposed || project.isDisposed) return@invokeLater
-                refreshBtn.isEnabled = true
+        val status = currentStatus
+        val version = SessionEpoch.current
+        setLoading(true)
+        service.refresh(status) {
+            if (!disposed && !project.isDisposed && status == currentStatus && version == SessionEpoch.current) {
+                setLoading(false)
                 updateListItems()
             }
         }
     }
 
-    private fun markAllAsRead() {
-        val notifService = LinuxDoNotificationService.getInstance()
-        if (notifService.isCircuitBroken()) {
-            val remainingSec = notifService.getRemainingCircuitBreakerSeconds()
-            val min = (remainingSec + 59) / 60
-            Messages.showWarningDialog(
-                this,
-                "通知请求正在冷却中 (还剩约 $min 分钟)。\n冷却结束后自动恢复轮询。",
-                "通知请求已暂停"
-            )
-            return
-        }
-        markAllReadBtn.isEnabled = false
-        notifService.markAsRead(null) {
-            ApplicationManager.getApplication().invokeLater {
-                if (disposed || project.isDisposed) return@invokeLater
-                markAllReadBtn.isEnabled = true
+    private fun loadMore() {
+        val status = currentStatus
+        val version = SessionEpoch.current
+        setLoading(true)
+        service.loadMore(status) {
+            if (!disposed && !project.isDisposed && status == currentStatus && version == SessionEpoch.current) {
+                setLoading(false)
                 updateListItems()
             }
+        }
+    }
+
+    private fun setLoading(value: Boolean) {
+        loading = value
+        refreshBtn.isEnabled = !value
+        loadMoreBtn.isEnabled = !value
+        manualReadBtn.isEnabled = !value && list.selectedValue?.read == false
+    }
+
+    private fun markAllAsRead() = markRead(null)
+
+    private fun markRead(id: Long?) {
+        if (itemsVersion != SessionEpoch.current) { updateListItems(); return }
+        markAllReadBtn.isEnabled = false
+        manualReadBtn.isEnabled = false
+        service.markAsRead(id) { success ->
+            if (disposed || project.isDisposed) return@markAsRead
+            markAllReadBtn.isEnabled = true
+            if (!success) messageLabel.text = service.lastReadError ?: "标读失败，请稍后重试"
+            updateListItems()
         }
     }
 
     fun updateListItems() {
-        val allList = LinuxDoNotificationService.getInstance().recentNotifications.toList()
-        val filtered = when (currentCategory) {
-            NotificationCategory.ALL -> allList
-            NotificationCategory.REPLIES -> allList.filter { it.notificationType in listOf(1, 2, 3, 9, 15, 34) }
-            NotificationCategory.LIKES -> allList.filter { it.notificationType in listOf(5, 19, 25) }
-            NotificationCategory.SYSTEM -> allList.filter { it.notificationType !in listOf(1, 2, 3, 5, 9, 15, 19, 25, 34) }
-        }
-
+        if (disposed || project.isDisposed) return
+        val history = service.history(currentStatus)
+        itemsVersion = SessionEpoch.current
+        val filtered = history.items.filter { item -> when (currentCategory) {
+            NotificationCategory.ALL -> true
+            NotificationCategory.REPLIES -> NotificationTypes.category(item) == "replies"
+            NotificationCategory.LIKES -> NotificationTypes.category(item) == "likes"
+            NotificationCategory.SYSTEM -> NotificationTypes.category(item) == "system"
+        } }
+        val selected = list.selectedValue?.id
+        val first = list.firstVisibleIndex
+        val anchor = if (first >= 0 && first < notificationModel.size()) notificationModel.getElementAt(first).id else null
+        val anchorOffset = if (first >= 0) scrollPane.viewport.viewPosition.y - (list.getCellBounds(first, first)?.y ?: 0) else 0
         notificationModel.clear()
-        for (item in filtered) {
-            notificationModel.addElement(item)
+        filtered.forEach(notificationModel::addElement)
+        list.selectedIndex = filtered.indexOfFirst { it.id == selected }
+        val anchorIndex = filtered.indexOfFirst { it.id == anchor }
+        if (anchorIndex >= 0) {
+            val y = list.getCellBounds(anchorIndex, anchorIndex)?.y ?: 0
+            scrollPane.viewport.viewPosition = Point(0, (y + anchorOffset).coerceAtLeast(0))
         }
-
-        val unreadTotal = allList.count { !it.read }
-        if (unreadTotal > 0) {
-            unreadBadgeLabel.text = "($unreadTotal 条未读)"
-            unreadBadgeLabel.isVisible = true
-        } else {
-            unreadBadgeLabel.text = ""
-            unreadBadgeLabel.isVisible = false
-        }
-
-        if (filtered.isEmpty()) {
-            cardLayout.show(contentDeck, "EMPTY")
-        } else {
-            cardLayout.show(contentDeck, "LIST")
-        }
+        unreadBadgeLabel.text = service.countState.label
+        unreadBadgeLabel.isVisible = true
+        val more = history.next != null
+        emptyTitle.text = if (more) "已加载通知中暂无匹配，可继续加载" else "暂无相关通知"
+        messageLabel.text = history.error ?: service.lastReadError ?: if (service.isCircuitBroken())
+            "通知请求正在冷却；稍后重试" else "已加载 ${history.items.size} 条；定位成功后自动标读"
+        loadMoreBtn.isVisible = more || history.failedQuery != null || !history.loaded
+        loadMoreBtn.text = if (history.failedQuery != null || !history.loaded) "重试加载" else "加载更多"
+        loadMoreBtn.isEnabled = !loading
+        manualReadBtn.isEnabled = !loading && list.selectedValue?.read == false
+        cardLayout.show(contentDeck, if (filtered.isEmpty()) "EMPTY" else "LIST")
         revalidate()
         repaint()
     }
@@ -346,33 +339,33 @@ class NotificationListPanel(
             isSelected: Boolean,
             cellHasFocus: Boolean
         ): Component {
-            val author = value.getDisplayAuthor()
+            val author = com.lgguan.linuxdo.plugin.theme.TopicDocumentRenderer.escapeHtml(value.getDisplayAuthor())
             val action = value.getTypeActionLabel()
             val isUnread = !value.read
 
             // 1. Icon Badge styling by notification type
-            when (value.notificationType) {
-                5, 19 -> { // Like
+            when (NotificationTypes.name(value.notificationType)) {
+                "liked", "liked_consolidated", "reaction" -> { // Like
                     iconBadge.text = "♥"
                     iconBadge.foreground = Color(0xE0, 0x48, 0x5D)
                     iconBadge.background = JBColor(Color(0xFF, 0xEE, 0xF0), Color(0x3B, 0x1E, 0x22))
                 }
-                2, 9 -> { // Reply
+                "replied", "posted", "quoted" -> { // Reply
                     iconBadge.text = "↩"
                     iconBadge.foreground = Color(0x09, 0x69, 0xDA)
                     iconBadge.background = JBColor(Color(0xDD, 0xF4, 0xFF), Color(0x1B, 0x2B, 0x3E))
                 }
-                1, 15 -> { // Mention
+                "mentioned", "group_mentioned" -> { // Mention
                     iconBadge.text = "@"
                     iconBadge.foreground = Color(0x82, 0x50, 0xDF)
                     iconBadge.background = JBColor(Color(0xF6, 0xEB, 0xFF), Color(0x2D, 0x1E, 0x3E))
                 }
-                34 -> { // Boost
+                "boost", "boosted", "boosted_consolidated" -> { // Boost
                     iconBadge.text = "🚀"
                     iconBadge.foreground = Color(0xBF, 0x87, 0x00)
                     iconBadge.background = JBColor(Color(0xFF, 0xF8, 0xC5), Color(0x3B, 0x32, 0x1B))
                 }
-                12 -> { // Badge
+                "granted_badge" -> { // Badge
                     iconBadge.text = "★"
                     iconBadge.foreground = Color(0x1A, 0x7F, 0x37)
                     iconBadge.background = JBColor(Color(0xDA, 0xF8, 0xE6), Color(0x1A, 0x38, 0x24))

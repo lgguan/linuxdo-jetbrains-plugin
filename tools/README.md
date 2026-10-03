@@ -6,6 +6,8 @@
 
 | 文件 | 用途 |
 | --- | --- |
+| `notification-reference-check.py` | 通过已有专用 Chrome 页面只读核对通知分页、状态、计数和本站类型配置；只保存字段与汇总，不访问 recent 或标读 |
+| `notification-navigation-regression.py` | 在独立浏览器上下文对生产导航脚本验证显示确认、缺失目标、失败、取消、不可见正文与旧回调；仅使用本地模拟页面 |
 | `clean-release-build.py` | 在干净目录构建当前源码，比较发布 ZIP 的 SHA-256 |
 | `package-release-source.py` | 打包当前允许列表中的完整源码、测试及验收资料，生成源码清单和安装包/源码包 SHA-256 |
 | `boost-reference-check.py` | 通过已有专用 Chrome 页面只读 GET 对照 `can_boost`、Boost 模型和删除权限；不加载新论坛页面，不发送或撤回 Boost |
@@ -84,3 +86,11 @@ python -m http.server 8765 --bind 127.0.0.1 --directory output/playwright
 另一个终端使用 Playwright CLI 打开 `http://127.0.0.1:8765/navigation-fixture.html`，执行 `playwright-cli run-code --filename tools/navigation-regression.js`。检查覆盖远距离跳转、请求合并与间隔、过期响应、429 冷却、本地定位、相邻分页和窄屏布局。数据与响应均为模拟，不连接论坛账号；截图位于 `output/playwright/`。
 
 已运行专用 Chrome CDP 窗口、Python 环境安装了 Playwright 时，也可直接运行 `python tools/navigation-regression.py --endpoint http://127.0.0.1:19337`。先生成导航 fixture；脚本在独立的无账号浏览器上下文中拦截本地页面请求，无需启动 HTTP 服务。覆盖跳转返回、失败跳转、429 期间返回、选区引用、代码引用、跨楼层选区和窄屏布局；不会操作现有论坛页面或读取账号凭据。
+
+## 通知回归
+
+`ui --reader-only` 同时验证通知弹窗、账号计数、历史分页与失败重试，以及生产文件编辑器新开和复用后的显示确认。单条和账号全部标读由内存 HTTP 传输接管，不修改真实账号状态。浏览器回归先运行 `python tools/navigation-fixture.py`，再用安装了 Playwright 的 Python 运行 `tools/notification-navigation-regression.py` 和 `tools/navigation-regression.py`。默认连接专用 Chrome CDP 端口 19337，建立并关闭自己的隔离上下文，不修改已有论坛页面。
+
+`ui --notifications-only` 在目标 IDEA 中打开两个真实项目窗口，通过通知按钮和列表点击进入实际 `FileEditorManager`，并派发 IDE 气泡的生产动作。覆盖新开与复用、403/404/缺失楼层、Boost 与个人消息、跨窗口计数和请求合并、切换标签页取消、老板键隐藏与恢复、模拟账号切换及原生 JCEF 回调通道断连后的重试。使用独立配置、模拟凭据和内存 HTTP，所有论坛写请求均被接管。两个测试窗口置顶，以免桌面上的其他程序挡住鼠标测试；退出时关闭这些测试项目。
+
+`python tools/notification-reference-check.py` 使用已有专用论坛页面执行 GET，只保存类型配置和字段汇总，不导出 Cookie、CSRF、用户名、正文或通知 ID，遇论坛错误即停止。本站真实标读需账号拥有者另行明确授权。

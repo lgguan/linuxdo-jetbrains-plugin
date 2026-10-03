@@ -400,11 +400,17 @@ object DiscourseApiClient {
         return result.map { it.currentUser }
     }
 
-    fun getNotifications(): Result<List<DiscourseNotification>> {
-        val url = DiscourseUrls.notifications(getBaseUrl())
-        val result = executeGet<NotificationListResponse>(url)
-        return result.map { it.notifications }
-    }
+    fun getNotifications(query: NotificationQuery = NotificationQuery(), expectedVersion: Long = SessionEpoch.current): Result<NotificationListResponse> =
+        executeGet(query.url(getBaseUrl()), expectedVersion)
+
+    fun getNotificationTotals(expectedVersion: Long = SessionEpoch.current): Result<NotificationTotals> =
+        executeGet<JsonObject>("${getBaseUrl()}/notifications/totals.json", expectedVersion).mapCatching(NotificationTotals::parse)
+
+    fun getNotificationTypes(expectedVersion: Long = SessionEpoch.current): Result<Map<String, Int>> =
+        executeGet<JsonObject>(DiscourseUrls.site(getBaseUrl()), expectedVersion).mapCatching { site ->
+            val types = site.getAsJsonObject("notification_types") ?: error("本站未返回通知类型配置")
+            types.entrySet().associate { it.key to it.value.asInt }
+        }
 
     private fun executeWrite(csrf: String?, build: (String?) -> Request): okhttp3.Response {
         val version = build(csrf).tag(SessionEpoch.Stamp::class.java)?.version ?: SessionEpoch.current
@@ -424,7 +430,8 @@ object DiscourseApiClient {
         val formBodyStr = if (notificationId != null) "id=$notificationId" else ""
 
         if (shouldUseJcefBridge()) {
-            return LinuxDoJcefBridge.executeForm(url, "PUT", formBodyStr, csrf, expectedVersion = session).map { true }
+            return LinuxDoJcefBridge.executeForm(url, "PUT", formBodyStr, csrf, expectedVersion = session)
+                .mapCatching { NotificationReadConfirmation.parse(gson.fromJson(it.body, JsonObject::class.java)) }
         }
 
         fun buildRequest(token: String?): Request {
@@ -448,7 +455,7 @@ object DiscourseApiClient {
                 val body = res.body?.string().orEmpty()
                 if (res.isSuccessful) {
                     LinuxDoLog.info("markNotificationRead success: notificationId=$notificationId")
-                    Result.success(true)
+                    Result.success(NotificationReadConfirmation.parse(gson.fromJson(body, JsonObject::class.java)))
                 } else {
                     LinuxDoLog.warn("markNotificationRead failed HTTP ${res.code}")
                     Result.failure(HttpFailure.classify(res.code, res.headers.toMap(), body)!!)
