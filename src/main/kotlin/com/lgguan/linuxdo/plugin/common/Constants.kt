@@ -31,7 +31,7 @@ object Constants {
         LATEST("latest", "最新话题 (Latest)", "/latest.json"),
         TOP("top", "全站热门 (Top)", "/top.json"),
         HOT("hot", "今日热帖 (Hot)", "/top.json?period=daily"),
-        NEW("new", "最新发表 (New)", "/new.json"),
+        NEW("new", "新话题 (New)", "/new.json"),
         UNREAD("unread", "未读话题 (Unread)", "/unread.json");
 
         override fun toString(): String = displayName

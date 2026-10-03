@@ -46,7 +46,7 @@ def main():
             manifest[rel.as_posix()] = digest(path)
     (DEST / "source-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     command = [str(source / "gradlew.bat")] if os.name == "nt" else ["sh", str(source / "gradlew")]
-    subprocess.run(command + ["test", "buildPlugin", "verifyPlugin", "--offline", "--console=plain"], cwd=source, check=True)
+    subprocess.run(command + ["test", "buildPlugin", "verifyPlugin", "-PdesktopTests=true", "--offline", "--console=plain"], cwd=source, check=True)
     packages = list((source / "build/distributions").glob("*.zip"))
     assert len(packages) == 1, "Expected exactly one release ZIP"
     package = packages[0]

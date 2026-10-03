@@ -72,17 +72,29 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
     private val publishedReplies = linkedMapOf<Long, com.lgguan.linuxdo.plugin.model.Post>()
     private var readingClock = com.lgguan.linuxdo.plugin.service.ReadingClock()
     private var readingVersion = com.lgguan.linuxdo.plugin.net.SessionEpoch.current
+    private var readingIdentity = LinuxDoReadTrackingService.getInstance().identity()
     private val readerController by lazy { TopicReaderController(project, backgroundTasks,
         { currentTopic }, { currentTopic = it },
         { key, version -> !disposed && !project.isDisposed && key == pageKey && version == readingVersion && version == com.lgguan.linuxdo.plugin.net.SessionEpoch.current },
         { key, id, result -> jbCefBrowser?.cefBrowser?.executeJavaScript(
             "window.linuxDoReaderResult && window.linuxDoReaderResult(${com.google.gson.Gson().toJson(key)},${com.google.gson.Gson().toJson(id)},${result});", "", 0) }) }
     private var editorSelected = false
+    private var readingScroll = -1L
+    private var lastSyncStatus: String? = null
     private val readingTimer = javax.swing.Timer(1000) {
-        if (!disposed && currentTopic != null && editorSelected && isShowing && jbCefBrowser?.runtime?.isUsable == true) {
+        if (!disposed && currentTopic != null && editorSelected && isShowing &&
+            javax.swing.SwingUtilities.getWindowAncestor(this)?.isActive == true &&
+            LinuxDoSettingsState.getInstance().autoReportReadTimings && jbCefBrowser?.runtime?.isUsable == true) {
             jbCefBrowser?.cefBrowser?.executeJavaScript("window.sampleDocReading && window.sampleDocReading();", "", 0)
-        } else readingClock.sample(emptySet(), false)
+        } else { readingClock.sample(emptySet(), false); flushReading() }
         if (readingClock.due()) flushReading()
+        currentTopic?.let { topic ->
+            val status = LinuxDoReadTrackingService.getInstance().syncStatus(topic.id)
+            if (status != lastSyncStatus) {
+                lastSyncStatus = status
+                jbCefBrowser?.cefBrowser?.executeJavaScript("window.linuxDoSyncStatus && window.linuxDoSyncStatus(${com.google.gson.Gson().toJson(status)});", "", 0)
+            }
+        }
     }.apply { start() }
 
     fun setSelected(selected: Boolean) {
@@ -93,7 +105,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
     fun preferredFocusedComponent(): javax.swing.JComponent = jbCefBrowser?.component ?: this
     private fun flushReading() {
         val pending = readingClock.drain()
-        currentTopic?.let { LinuxDoReadTrackingService.getInstance().submitTimings(it.id, pending, readingVersion) }
+        currentTopic?.let { LinuxDoReadTrackingService.getInstance().submitTimings(it.id, pending, readingIdentity) }
     }
 
     @Volatile var currentPostNumber: Int? = null
@@ -452,20 +464,6 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                             }
                         }
                     }
-                    "boost" -> {
-                        val postId = json?.get("postId")?.asLong ?: rawPayload.split(":").getOrNull(1)?.toLongOrNull()
-                        val floor = json?.get("floor")?.asInt ?: rawPayload.split(":").getOrNull(2)?.toIntOrNull() ?: 1
-                        val author = json?.get("author")?.asString ?: rawPayload.split(":").getOrNull(3) ?: ""
-                        if (postId != null && currentTopic?.postStream?.posts?.any { it.id == postId } == true) {
-                            ApplicationManager.getApplication().invokeLater {
-                            if (disposed || project.isDisposed || callbackGeneration != loadGeneration || callbackPage != browser.documentTrust.token || callbackEpoch != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
-                                val dialog = com.lgguan.linuxdo.plugin.ui.dialog.BoostQuickReplyDialog(project, postId, floor, author) {
-                                    readerController.handle(pageKey,java.util.UUID.randomUUID().toString(),"postInfo",postId,com.google.gson.JsonObject(),callbackEpoch)
-                                }
-                                dialog.show()
-                            }
-                        }
-                    }
                     "openAuth" -> {
                         ApplicationManager.getApplication().invokeLater {
                             if (disposed || project.isDisposed || callbackGeneration != loadGeneration || callbackPage != browser.documentTrust.token || callbackEpoch != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
@@ -508,16 +506,19 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                         val floors = json?.getAsJsonArray("floors")?.map { it.asInt }?.toSet().orEmpty()
                         ApplicationManager.getApplication().invokeLater {
                             if (disposed || callbackGeneration != loadGeneration || callbackPage != browser.documentTrust.token || callbackEpoch != com.lgguan.linuxdo.plugin.net.SessionEpoch.current || readingVersion != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
-                            val active = editorSelected && isShowing && javax.swing.SwingUtilities.getWindowAncestor(this)?.isActive == true
+                            val active = editorSelected && isShowing && javax.swing.SwingUtilities.getWindowAncestor(this)?.isActive == true && LinuxDoSettingsState.getInstance().autoReportReadTimings
                             val topic = currentTopic ?: return@invokeLater
                             val valid = floors.intersect(topic.postStream.posts.map { it.postNumber }.toSet())
-                            val readFloors = readingClock.sample(valid, active).keys
+                            val scroll = json?.get("scroll")?.asLong ?: readingScroll
+                            val readFloors = readingClock.sample(valid, active, scroll != readingScroll, json?.get("bodyVisible")?.asBoolean ?: valid.isNotEmpty()).keys
+                            readingScroll = scroll
                             readFloors.forEach { floor ->
                                 currentPostNumber = floor
                                 LinuxDoReadTrackingService.getInstance().markFloorRead(topic.id, floor)
                             }
                             if (readFloors.isNotEmpty()) jbCefBrowser?.cefBrowser?.executeJavaScript(
                                 "window.applyDocRead && window.applyDocRead(${com.google.gson.Gson().toJson(readFloors)});", "", 0)
+                            if (!active || readingClock.due()) flushReading()
                         }
                     }
                     "reportRead" -> {
@@ -580,8 +581,8 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                             quoteReply: function(floor, text) {
                                 ${query.inject(" JSON.stringify({ action: 'quoteReply', floor: floor, text: text }) ")}
                             },
-                            readingSample: function(floors) {
-                                ${query.inject(" JSON.stringify({ action: 'readingSample', floors: floors }) ")}
+                            readingSample: function(floors, scroll, bodyVisible) {
+                                ${query.inject(" JSON.stringify({ action: 'readingSample', floors: floors, scroll: scroll, bodyVisible: bodyVisible }) ")}
                             },
                             copyCode: function(text, requestId) {
                                 ${query.inject(" JSON.stringify({ action: 'copyCode', text: text, requestId: requestId }) ")}
@@ -597,9 +598,6 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                             },
                             toggleLike: function(postId, like) {
                                 ${query.inject(" JSON.stringify({ action: 'like', postId: postId, like: like }) ")}
-                            },
-                            boostPost: function(postId, floor, author) {
-                                ${query.inject(" JSON.stringify({ action: 'boost', postId: postId, floor: floor, author: author }) ")}
                             },
                             replyPost: function(floor, author) {
                                 ${query.inject(" JSON.stringify({ action: 'reply', floor: floor, author: author }) ")}
@@ -683,7 +681,10 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
         if (disposed) return
         flushReading()
         readingClock = com.lgguan.linuxdo.plugin.service.ReadingClock()
+        readingScroll = -1L
+        lastSyncStatus = null
         readingVersion = com.lgguan.linuxdo.plugin.net.SessionEpoch.current
+        readingIdentity = LinuxDoReadTrackingService.getInstance().identity()
         requestedTopicId = topicId
         requestedFloor = targetPostNumber
         currentPostNumber = targetPostNumber

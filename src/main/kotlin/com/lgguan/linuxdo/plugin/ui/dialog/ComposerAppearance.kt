@@ -1,6 +1,13 @@
 package com.lgguan.linuxdo.plugin.ui.dialog
 
 import com.intellij.ui.JBColor
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.editor.colors.EditorColorsManager
+import com.intellij.openapi.editor.colors.EditorColorsListener
+import com.intellij.ide.ui.LafManagerListener
+import com.lgguan.linuxdo.plugin.theme.EditorColorSchemeAdapter
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
@@ -9,6 +16,38 @@ import javax.swing.*
 import javax.swing.border.AbstractBorder
 
 internal object ComposerAppearance {
+    /** Update colors without replacing documents, undo stacks, or selected text. */
+    fun followTheme(owner: Disposable, root: JComponent, text: JTextArea, panel: JPanel, title: JTextField? = null,
+                    refresh: () -> Unit) {
+        fun update() {
+            DialogTheme.refresh(root)
+            val scheme = EditorColorsManager.getInstance().globalScheme
+            val theme = EditorColorSchemeAdapter.getCurrentThemeColors()
+            text.background = scheme.defaultBackground
+            text.foreground = scheme.defaultForeground
+            text.caretColor = scheme.defaultForeground
+            text.selectionColor = scheme.getColor(com.intellij.openapi.editor.colors.EditorColors.SELECTION_BACKGROUND_COLOR)
+                ?: UIUtil.getListSelectionBackground(true)
+            text.selectedTextColor = scheme.getColor(com.intellij.openapi.editor.colors.EditorColors.SELECTION_FOREGROUND_COLOR)
+                ?: scheme.defaultForeground
+            val font = UIUtil.getFontWithFallback(Font(theme.fontName, Font.PLAIN, theme.fontSize))
+            text.font = font.deriveFont(font.size2D.coerceAtLeast(14f))
+            title?.font = font
+            panel.background = scheme.defaultBackground
+            (panel.components.filterIsInstance<JScrollPane>().firstOrNull())?.viewport?.background = scheme.defaultBackground
+            refresh()
+            panel.revalidate(); panel.repaint()
+        }
+        val connection = ApplicationManager.getApplication().messageBus.connect(owner)
+        var closed = false
+        com.intellij.openapi.util.Disposer.register(owner, Disposable { closed = true })
+        fun later() = ApplicationManager.getApplication().invokeLater({
+            if (!closed) update()
+        }, ModalityState.any())
+        connection.subscribe(EditorColorsManager.TOPIC, EditorColorsListener { later() })
+        connection.subscribe(LafManagerListener.TOPIC, LafManagerListener { later() })
+        update()
+    }
     fun editor(text: JTextArea, toolbar: JComponent, counter: JLabel): JPanel {
         text.margin = JBUI.insets(14)
         text.font = text.font.deriveFont(text.font.size2D.coerceAtLeast(14f))
@@ -17,7 +56,7 @@ internal object ComposerAppearance {
             JBUI.Borders.customLineBottom(JBColor.border()), JBUI.Borders.empty(5, 6))
         val footer = JPanel(BorderLayout()).apply {
             isOpaque = false; border = JBUI.Borders.empty(5, 14, 8, 14)
-            add(JLabel("Markdown").apply { foreground = UIUtil.getContextHelpForeground(); font = font.deriveFont(11f) }, BorderLayout.WEST)
+            add(JLabel("Markdown").apply { foreground = JBColor.namedColor("ContextHelp.foreground", UIUtil.getContextHelpForeground()); font = font.deriveFont(11f) }, BorderLayout.WEST)
             counter.font = counter.font.deriveFont(11f)
             add(counter, BorderLayout.EAST)
         }

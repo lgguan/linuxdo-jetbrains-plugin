@@ -52,6 +52,7 @@ class IssueListPanel(
     }.apply { isRepeats = false }
 
     private val topicListModel = DefaultListModel<Topic>()
+    private val topicRenderer = TopicCardCellRenderer()
     private val topicList = object : JBList<Topic>(topicListModel) {
         override fun getScrollableTracksViewportWidth() = true
         override fun getToolTipText(event: MouseEvent): String? {
@@ -66,6 +67,10 @@ class IssueListPanel(
 
     private val categoryComboBox = ComboBox<CategoryItem>()
     private val filterComboBox = ComboBox(Constants.TopicFilter.values())
+    private val tagSelector = com.lgguan.linuxdo.plugin.ui.dialog.BrowseTagSelector(listenerLifetime,
+        com.lgguan.linuxdo.plugin.ui.dialog.TagSelectionField.Mode.BROWSE) {
+        if (!isUpdatingDropdown) { activeSearchQuery = null; refreshList() }
+    }
     private val searchField = JBTextField(10)
 
     // Top outside quick action buttons
@@ -120,10 +125,11 @@ class IssueListPanel(
             val selectedCatId = (categoryComboBox.selectedItem as? CategoryItem)?.id
             val dialog = com.lgguan.linuxdo.plugin.ui.dialog.AdvancedSearchDialog(
                 project = project,
-                initialQuery = searchField.text.trim(),
+                initialQuery = activeSearchQuery ?: searchField.text.trim(),
                 initialCategoryId = selectedCatId,
+                initialTag = tagSelector.selection().firstOrNull(),
                 onSearch = { fullQuery ->
-                    search(fullQuery)
+                    search(fullQuery, inheritList = false)
                 }
             )
             dialog.show()
@@ -312,22 +318,8 @@ class IssueListPanel(
             }
         })
 
-        // Row 2: Category Dropdown (58%) + Topic Filter Dropdown (42%)
-        val row2 = JPanel(GridBagLayout())
-        val gbc = GridBagConstraints()
-        gbc.fill = GridBagConstraints.BOTH
-        gbc.gridy = 0
-        gbc.weighty = 1.0
-
-        gbc.gridx = 0
-        gbc.weightx = 0.58
-        gbc.insets = JBUI.insets(0, 0, 0, 4)
-        row2.add(categoryComboBox, gbc)
-
-        gbc.gridx = 1
-        gbc.weightx = 0.42
-        gbc.insets = JBUI.emptyInsets()
-        row2.add(filterComboBox, gbc)
+        // Adjacent category and searchable tag combos; list type wraps below at narrow widths.
+        val row2 = com.lgguan.linuxdo.plugin.ui.dialog.TopicFilterRow(categoryComboBox, tagSelector.field, filterComboBox)
 
         // Row 3: Full-width Search field + Search & Advanced Search buttons
         val row3 = JPanel(BorderLayout(3, 0))
@@ -352,7 +344,7 @@ class IssueListPanel(
         add(topPanel, BorderLayout.NORTH)
 
         // Center Area: List vs Empty State
-        topicList.cellRenderer = TopicCardCellRenderer()
+        topicList.cellRenderer = topicRenderer
         topicList.selectionMode = ListSelectionModel.SINGLE_SELECTION
         val scrollPane = listScrollPane
         topicList.toolTipText = ""
@@ -551,6 +543,10 @@ class IssueListPanel(
                 val index = topicList.locationToIndex(e.point)
                 if (index != -1 && topicList.getCellBounds(index, index)?.contains(e.point) == true) {
                     val selected = topicListModel.getElementAt(index)
+                    val cell = topicList.getCellBounds(index, index)
+                    val tag = topicRenderer.tagAt(topicList, selected, index,
+                        Point(e.x - cell.x, e.y - cell.y), cell.size)
+                    if (tag != null) { tagSelector.setSelection(listOf(tag), notify = true); return }
                     safeOpenTopic(selected)
                 } else {
                     val selected = topicList.selectedValue ?: return
@@ -651,6 +647,10 @@ class IssueListPanel(
 
         LinuxDoTopicService.getInstance().addCategoryListener(listenerLifetime) { list ->
             populateCategoryDropdown(list)
+        }
+
+        com.lgguan.linuxdo.plugin.service.LinuxDoReadTrackingService.getInstance().addSyncListener(listenerLifetime) {
+            if (!disposed && !project.isDisposed) topicList.repaint()
         }
 
         LinuxDoSettingsState.getInstance().addSettingsListener(listenerLifetime) {
@@ -867,7 +867,7 @@ class IssueListPanel(
 
     fun refreshList() {
         if (activeSearchQuery != null) {
-            executeSearch()
+            loadSearchPage(activeSearchQuery!!, 1)
             return
         }
         loadPage(0)
@@ -904,13 +904,15 @@ class IssueListPanel(
         val selectedCatItem = categoryComboBox.selectedItem as? CategoryItem
         val category = selectedCatItem?.id?.let { LinuxDoTopicService.getInstance().getCategory(it) }
         val filter = filterComboBox.selectedItem as? Constants.TopicFilter ?: Constants.TopicFilter.LATEST
-        val condition = "list:${selectedCatItem?.id}:$filter"
+        val tag = tagSelector.selection().firstOrNull()
+        val condition = "list:$session:${selectedCatItem?.id}:$filter:$tag"
 
         listTask?.cancel(true)
         listTask = LinuxDoTopicService.getInstance().loadTopics(
             filter = filter,
             category = category,
             page = page,
+            tag = tag,
             onSuccess = { topics, hasMore ->
                 if (disposed || project.isDisposed || generation != requestGeneration ||
                     session != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@loadTopics
@@ -939,12 +941,12 @@ class IssueListPanel(
         )
     }
 
-    fun search(query: String) {
+    @JvmOverloads fun search(query: String, inheritList: Boolean = true) {
         searchField.text = query
-        executeSearch()
+        executeSearch(inheritList)
     }
 
-    private fun executeSearch() {
+    private fun executeSearch(inheritList: Boolean = true) {
         if (disposed || project.isDisposed) return
         val query = searchField.text.trim()
         if (query.isBlank()) {
@@ -952,15 +954,17 @@ class IssueListPanel(
             refreshList()
             return
         }
-        activeSearchQuery = query
-        loadSearchPage(query, 1)
+        val fullQuery = if (inheritList) com.lgguan.linuxdo.plugin.model.AdvancedSearchQuery.inherit(query,
+            (categoryComboBox.selectedItem as? CategoryItem)?.id, tagSelector.selection().firstOrNull()) else query
+        activeSearchQuery = fullQuery
+        loadSearchPage(fullQuery, 1)
     }
 
     private fun loadSearchPage(query: String, page: Int) {
         if (disposed || project.isDisposed || (isLoading && page > 1)) return
         val generation = ++requestGeneration
         val session = com.lgguan.linuxdo.plugin.net.SessionEpoch.current
-        val condition = "search:$query"
+        val condition = "search:$session:$query"
         startLoading(if (page > 1) "正在加载更多搜索结果…" else "正在搜索话题…")
         emptyTipIcon.icon = AllIcons.Actions.Search
         updateDescText("正在查找符合条件的话题，请稍候。")

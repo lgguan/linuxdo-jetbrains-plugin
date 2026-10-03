@@ -31,7 +31,7 @@ internal class ComposerPreviewView(private val tasks: BackgroundTasks, private v
         component.minimumSize = java.awt.Dimension(0, 0)
         status.border = com.intellij.util.ui.JBUI.Borders.empty(5, 8)
         status.font = status.font.deriveFont(11f)
-        status.foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
+        status.foreground = com.intellij.ui.JBColor.namedColor("ContextHelp.foreground", com.intellij.util.ui.UIUtil.getContextHelpForeground())
         component.add(fallbackScroll); component.add(status, BorderLayout.SOUTH)
     }
 
@@ -71,10 +71,18 @@ internal class ComposerPreviewView(private val tasks: BackgroundTasks, private v
         }
     }
 
-    private fun updateBrowser() {
+    private fun updateBrowser(contentChanged: Boolean = true) {
         val view = browser ?: return
         if (!ready || view.isDisposed || closed) return
-        view.cefBrowser.executeJavaScript("(function(){var y=window.scrollY;document.getElementById('composer-content').innerHTML=${Gson().toJson(body)};window.scrollTo(0,y);})();", view.cefBrowser.url, 0)
+        val content = if (contentChanged) "document.getElementById('composer-content').innerHTML=${Gson().toJson(body)};" else ""
+        view.cefBrowser.executeJavaScript("(function(){var y=window.scrollY;document.getElementById('composer-theme').textContent=${Gson().toJson(ComposerPreview.styles())};$content window.scrollTo(0,y);})();", view.cefBrowser.url, 0)
+    }
+
+    fun refreshTheme() {
+        if (closed || disposed()) return
+        DialogTheme.refresh(component, includeWindow = false)
+        if (browser != null) updateBrowser(contentChanged = false) else if (initialized) display(body)
+        component.repaint()
     }
 
     fun local(source: String) {

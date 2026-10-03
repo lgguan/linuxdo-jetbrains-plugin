@@ -492,14 +492,25 @@ object DocCamouflageCssBuilder {
             }
 
             /* Unread floor indicator */
+            .floor-position {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex: 0 0 auto;
+                white-space: nowrap;
+            }
+            .floor-read-indicator {
+                display: inline-flex;
+                flex: 0 0 7px;
+                width: 7px;
+                height: 7px;
+            }
             .unread-dot {
                 display: inline-block;
                 width: 7px;
                 height: 7px;
                 border-radius: 50%;
                 background-color: #388BFD;
-                margin-right: 6px;
-                vertical-align: 1px;
                 box-shadow: 0 0 5px rgba(56, 139, 253, 0.7);
                 cursor: pointer;
                 transition: transform 0.15s ease, opacity 0.2s ease;
@@ -647,7 +658,8 @@ object DocCamouflageCssBuilder {
             }
             .doc-meta-comment { white-space: pre-wrap; overflow-wrap: anywhere; }
             .doc-container, .post-entry, .post-content, .floor-meta, .floor-number { min-width: 0; overflow-wrap: anywhere; }
-            .floor-comment-header, .floor-actions { flex-wrap: wrap; gap: 8px; }
+            .floor-comment-header { flex-wrap: nowrap; gap: 8px; }
+            .floor-actions { flex-wrap: wrap; gap: 8px; }
             .floor-meta { flex: 1 1 340px; }
             .floor-actions { max-width: 100%; }
             .post-content pre, .post-content table { max-width: 100%; overflow-x: auto; }
@@ -672,7 +684,7 @@ object DocCamouflageCssBuilder {
                 .image-lightbox-title { max-width: 100%; }
                 .post-content img { max-width: 100% !important; }
             }
-        """.trimIndent() + "\n" + navigationCss
+        """.trimIndent() + "\n" + navigationCss + "\n" + requireNotNull(javaClass.getResource("/web/boost.css")).readText()
     }
 
 }

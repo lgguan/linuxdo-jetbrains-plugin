@@ -1,546 +1,263 @@
 package com.lgguan.linuxdo.plugin.ui.dialog
 
-import com.intellij.icons.AllIcons
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
-import com.intellij.openapi.ui.popup.JBPopup
-import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.ui.ValidationInfo
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.ui.DocumentAdapter
-import com.intellij.ui.JBColor
-import com.intellij.ui.awt.RelativePoint
-import com.intellij.ui.components.ActionLink
-import com.intellij.ui.components.JBCheckBox
-import com.intellij.ui.components.JBLabel
-import com.intellij.ui.components.JBList
-import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.components.JBTextField
+import com.intellij.ui.components.*
 import com.intellij.util.Alarm
 import com.intellij.util.ui.JBUI
-import com.intellij.util.ui.UIUtil
-import com.lgguan.linuxdo.plugin.config.LinuxDoSettingsState
-import com.lgguan.linuxdo.plugin.model.Category
-import com.lgguan.linuxdo.plugin.model.TagItem
+import com.lgguan.linuxdo.plugin.api.DiscourseApiClient
+import com.lgguan.linuxdo.plugin.common.BackgroundTasks
+import com.lgguan.linuxdo.plugin.model.*
+import com.lgguan.linuxdo.plugin.net.SessionEpoch
+import com.lgguan.linuxdo.plugin.service.LinuxDoAuthService
 import com.lgguan.linuxdo.plugin.service.LinuxDoTopicService
-import com.lgguan.linuxdo.plugin.theme.NamespaceFormatter
-import com.lgguan.linuxdo.plugin.ui.toolwindow.IssueListPanel.CategoryItem
-import java.awt.BorderLayout
-import java.awt.Dimension
-import java.awt.FlowLayout
-import java.awt.Font
-import java.awt.GridBagConstraints
-import java.awt.GridBagLayout
-import java.awt.Point
-import java.awt.event.KeyAdapter
-import java.awt.event.KeyEvent
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import javax.swing.DefaultListCellRenderer
-import javax.swing.DefaultListModel
-import javax.swing.JComboBox
-import javax.swing.JComponent
-import javax.swing.JList
-import javax.swing.JPanel
-import javax.swing.ListSelectionModel
-import javax.swing.SwingUtilities
+import com.lgguan.linuxdo.plugin.ui.toolwindow.IssueListPanel
+import java.awt.*
+import java.awt.datatransfer.StringSelection
+import javax.swing.*
 import javax.swing.event.DocumentEvent
 
 class AdvancedSearchDialog(
     project: Project,
     initialQuery: String = "",
-    private val categories: List<CategoryItem> = emptyList(),
+    private val categories: List<IssueListPanel.CategoryItem> = emptyList(),
     private val initialCategoryId: Int? = null,
+    initialTag: String? = null,
     private val onSearch: (String) -> Unit
 ) : DialogWrapper(project, true) {
+    constructor(project: Project, initialQuery: String = "", onSearch: (String) -> Unit) :
+        this(project, initialQuery, emptyList(), null, null, onSearch)
+    constructor(project: Project, initialQuery: String, categories: List<IssueListPanel.CategoryItem>, onSearch: (String) -> Unit) :
+        this(project, initialQuery, categories, null, null, onSearch)
 
-    // Secondary constructors for backward compatibility
-    constructor(
-        project: Project,
-        initialQuery: String = "",
-        onSearch: (String) -> Unit
-    ) : this(project, initialQuery, emptyList(), null, onSearch)
-
-    constructor(
-        project: Project,
-        initialQuery: String = "",
-        categories: List<CategoryItem> = emptyList(),
-        onSearch: (String) -> Unit
-    ) : this(project, initialQuery, categories, null, onSearch)
-
-    private val keywordField = JBTextField(initialQuery)
-    private val inTitleCheckBox = JBCheckBox("仅搜索话题标题 (in:title)")
-    private val categoryCombo = JComboBox<CategoryItem>()
-
-    private val tagField = JBTextField()
-    private val tagSuggestionsModel = DefaultListModel<TagItem>()
-    private val tagSuggestionsList = JBList(tagSuggestionsModel)
-    private var tagPopup: JBPopup? = null
-    private val tagAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, disposable)
-
-    private val authorField = JBTextField()
-    private val orderCombo = JComboBox(arrayOf(
-        SortOption("默认相关度 (Relevance)", ""),
-        SortOption("最新发布 (Latest Created)", "order:latest"),
-        SortOption("最多点赞 (Most Liked)", "order:likes"),
-        SortOption("最多浏览 (Most Viewed)", "order:views"),
-        SortOption("最新活动 (Latest Activity)", "order:activity")
-    ))
-    private val timeRangeCombo = JComboBox(arrayOf(
-        TimeOption("不限时间 (Any Time)", 0),
-        TimeOption("最近 24 小时 (Past 24 Hours)", 1),
-        TimeOption("最近 7 天 (Past 7 Days)", 7),
-        TimeOption("最近 30 天 (Past 30 Days)", 30),
-        TimeOption("最近 1 年 (Past Year)", 365)
-    ))
-    private val minPostsField = JBTextField()
-
-    private val categoryListener: (List<Category>) -> Unit = {
-        ApplicationManager.getApplication().invokeLater {
-            populateCategoryComboBox()
-        }
-    }
-
-    data class SortOption(val label: String, val syntax: String) {
-        override fun toString(): String = label
-    }
-
-    data class TimeOption(val label: String, val daysAgo: Int) {
-        override fun toString(): String = label
-    }
+    private val seed = if (initialQuery.isBlank()) listOfNotNull(initialCategoryId?.let { "category:$it" }, initialTag?.let { "tag:$it" }).joinToString(" ")
+        else AdvancedSearchQuery.inherit(initialQuery, initialCategoryId, initialTag)
+    private var queryModel = AdvancedSearchQuery.parse(seed)
+    private val keywordField = JBTextField(queryModel.text)
+    private val categoryCombo = ComposerCategoryPicker()
+    private val tagSelector = BrowseTagSelector(disposable, TagSelectionField.Mode.SEARCH) { updatePreview() }
+    private val allTags = JBCheckBox("全部匹配（取消后任一匹配）", queryModel.filters["tags"]?.contains('+') == true)
+    private val authorField = JBTextField(queryModel.filters["author"].orEmpty())
+    private val authorMatches = JComboBox<String>().apply { isVisible = false }
+    private val userAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, disposable)
+    private val tasks = BackgroundTasks()
+    private var userGeneration = 0L
+    private var capabilitiesGeneration = 0L
+    private var capabilities = SearchCapabilities()
+    private var changing = false
+    private var categoryTouched = false
+    private var statusTouched = false
+    private var orderTouched = false
+    private val checks = linkedMapOf<String, JBCheckBox>()
+    private val dateFields = linkedMapOf("after" to JBTextField(), "before" to JBTextField())
+    private val numberFields = linkedMapOf("min_posts" to JBTextField(), "max_posts" to JBTextField(), "min_views" to JBTextField(), "max_views" to JBTextField())
+    private data class Option(val value: String, val label: String) { override fun toString() = label }
+    private val scopeCombo = JComboBox(arrayOf(Option("", "话题与帖子"), Option("all", "所有内容（含个人消息）"), Option("messages", "个人消息")))
+    private val statusCombo = JComboBox<Option>()
+    private val orderCombo = JComboBox<Option>()
+    private val preview = JBTextArea().apply { isEditable = false; lineWrap = true; wrapStyleWord = true; rows = 3; name = "search-query-preview" }
+    private val featureStatus = JBLabel("正在核对论坛搜索选项…")
+    private val featureRetry = JButton("重试").apply { isVisible = false; addActionListener { loadCapabilities() } }
+    private val tagContainer = JPanel(BorderLayout(0, 5)).apply { add(tagSelector.field); add(allTags, BorderLayout.SOUTH) }
+    private val morePanel = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
+    private val categoryListener: (List<Category>) -> Unit = { populateCategories() }
 
     init {
-        title = "高级搜索 (Advanced Search) - Linux Do"
-        setOKButtonText("搜索 (Search)")
-        setCancelButtonText("取消 (Cancel)")
-
-        tagField.emptyText.text = "如: 原创, 快问快答, dev 等 (支持动态联想搜索)"
-        authorField.emptyText.text = "如: neo 或用户名"
-        minPostsField.emptyText.text = "如: 5"
-
-        setupTagSuggestionsList()
-
-        // Populate hierarchical categories
-        populateCategoryComboBox()
+        title = "高级搜索 - Linux Do"
+        setOKButtonText("搜索"); setCancelButtonText("取消")
+        keywordField.emptyText.text = "关键词、引用短语或手写查询语法"
+        tagSelector.setSelection(queryModel.filters["tags"]?.split('+', ',').orEmpty())
+        (dateFields + numberFields).forEach { (key, field) -> field.text = queryModel.filters[key].orEmpty() }
+        dateFields.values.forEach { it.emptyText.text = "YYYY-MM-DD"; it.toolTipText = "日期（YYYY-MM-DD），也兼容手写查询中的距今天数" }
+        numberFields.values.forEach { it.emptyText.text = "不限" }
+        (AdvancedSearchQuery.publicScopes + AdvancedSearchQuery.personalScopes).forEach { (value, label) ->
+            checks["in:$value"] = JBCheckBox(label, queryModel.filters.containsKey("in:$value"))
+        }
+        checks["with"] = JBCheckBox("含图片", queryModel.filters["with"] == "images")
+        mapOf("is:category_expert_question" to "板块专家问题", "with:category_expert_response" to "有专家回应", "without:category_expert_post" to "尚无专家帖子").forEach { (key, label) ->
+            checks[key] = JBCheckBox(label, queryModel.filters.containsKey(key))
+        }
+        populateCategories()
+        configureOptions()
+        init()
+        keywordField.document.addDocumentListener(changeListener())
+        (dateFields + numberFields).values.forEach { it.document.addDocumentListener(changeListener()) }
+        authorField.document.addDocumentListener(object : DocumentAdapter() {
+            override fun textChanged(e: DocumentEvent) { updatePreview(); suggestUsers() }
+        })
+        authorMatches.addActionListener {
+            if (!changing && authorMatches.selectedItem != null) { authorField.text = authorMatches.selectedItem.toString(); authorMatches.isVisible = false }
+        }
+        categoryCombo.addActionListener { if (!changing) { categoryTouched = true; updatePreview() } }
+        scopeCombo.addActionListener { updatePreview() }
+        statusCombo.addActionListener { if (!changing) statusTouched = true; updatePreview() }
+        orderCombo.addActionListener { if (!changing) orderTouched = true; updatePreview() }
+        allTags.addActionListener { updatePreview() }
+        checks.values.forEach { it.addActionListener { updatePreview() } }
         LinuxDoTopicService.getInstance().addCategoryListener(disposable, categoryListener)
         LinuxDoTopicService.getInstance().loadCategories()
-
-        // Preload popular system tags
-        LinuxDoTopicService.getInstance().loadPopularTags()
-
-        init()
+        LinuxDoAuthService.getInstance().addAuthListener(disposable) { queryModel = collect(); configureOptions(); loadCapabilities() }
+        updatePreview(); loadCapabilities()
     }
 
-    override fun dispose() {
-        tagAlarm.cancelAllRequests()
-        tagPopup?.cancel()
-        tagPopup = null
-        LinuxDoTopicService.getInstance().removeCategoryListener(categoryListener)
-        super.dispose()
-    }
-
-    private fun populateCategoryComboBox() {
-        if (!SwingUtilities.isEventDispatchThread()) {
-            SwingUtilities.invokeLater { populateCategoryComboBox() }
-            return
-        }
-        val prevSelectedId = (categoryCombo.selectedItem as? CategoryItem)?.id ?: initialCategoryId
-        categoryCombo.removeAllItems()
-        val settings = LinuxDoSettingsState.getInstance()
-        val allLabel = if (settings.categoryNamespaceFormat) "All Packages (全部版块)" else "全部版块 (All Categories)"
-        categoryCombo.addItem(CategoryItem(null, allLabel, null))
-
+    private fun changeListener() = object : DocumentAdapter() { override fun textChanged(e: DocumentEvent) = updatePreview() }
+    private fun populateCategories() {
+        if (isDisposed) return
+        changing = true
+        val selectedId = (categoryCombo.selectedItem as? CategoryItem)?.id
+        val filter = queryModel.filters["category"]
+        categoryCombo.removeAllItems(); categoryCombo.addItem(CategoryItem(null, "全部板块", null, null))
         val service = LinuxDoTopicService.getInstance()
-        val hierarchicalList = service.getHierarchicalCategories()
-
-        var restoreIndex = 0
-        for ((idx, hCat) in hierarchicalList.withIndex()) {
-            val cat = hCat.category
-            val parent = hCat.parent
-            val lockPrefix = if (cat.readRestricted == true) "🔒 " else ""
-            val displayName = if (settings.categoryNamespaceFormat) {
-                if (parent == null) {
-                    "$lockPrefix${NamespaceFormatter.format(cat.name, cat.slug)}"
-                } else {
-                    val parentFormatted = NamespaceFormatter.format(parent.name, parent.slug)
-                    "$lockPrefix$parentFormatted.${cat.slug}"
-                }
-            } else {
-                if (parent == null) {
-                    "$lockPrefix${cat.name}"
-                } else {
-                    "  └ $lockPrefix${cat.name}"
-                }
-            }
-            categoryCombo.addItem(CategoryItem(cat.id, displayName, cat.slug, parent?.slug))
-            if (prevSelectedId != null && cat.id == prevSelectedId) {
-                restoreIndex = idx + 1
-            }
+        val options = ComposerCategories.options(service.categories.toList(), postingOnly = false).ifEmpty {
+            categories.filter { it.id != null }.map { CategoryItem(it.id, it.name, it.slug, null) }
         }
-        categoryCombo.selectedIndex = restoreIndex
+        options.forEach(categoryCombo::addItem)
+        val chosen = options.firstOrNull { item ->
+            if (categoryTouched) item.id == selectedId else filter?.let { raw ->
+                raw == item.id.toString() || raw.removePrefix("#") == item.slug || service.getCategory(item.id)?.let { cat ->
+                    val parent = service.getCategory(cat.parentCategoryId)
+                    raw == "#${parent?.slug}:${cat.slug}"
+                } == true
+            } == true
+        }
+        categoryCombo.selectedItem = chosen ?: categoryCombo.getItemAt(0)
+        changing = false
     }
-
-    private fun setupTagSuggestionsList() {
-        tagSuggestionsList.selectionMode = ListSelectionModel.SINGLE_SELECTION
-        tagSuggestionsList.cellRenderer = object : DefaultListCellRenderer() {
-            override fun getListCellRendererComponent(
-                list: JList<*>?,
-                value: Any?,
-                index: Int,
-                isSelected: Boolean,
-                cellHasFocus: Boolean
-            ): java.awt.Component {
-                val comp = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-                if (value is TagItem) {
-                    text = if (value.count > 0) "#${value.text} (${value.count} 话题)" else "#${value.text}"
-                    icon = AllIcons.Nodes.Tag
-                }
-                return comp
-            }
+    private fun configureOptions() {
+        if (isDisposed) return
+        changing = true
+        val loggedIn = LinuxDoAuthService.getInstance().isLoggedIn
+        checks.forEach { (key, box) -> box.isVisible = when {
+            key.removePrefix("in:") in AdvancedSearchQuery.personalScopes -> loggedIn
+            key.contains("category_expert") -> capabilities.experts
+            else -> true
+        } }
+        scopeCombo.isVisible = loggedIn
+        fun populate(combo: JComboBox<Option>, values: Map<String, String>, current: String?) {
+            combo.removeAllItems(); values.forEach { (value, label) -> combo.addItem(Option(value, label)) }
+            combo.selectedItem = (0 until combo.itemCount).map { combo.getItemAt(it) }.firstOrNull { it.value == current } ?: combo.getItemAt(0)
         }
-
-        tagSuggestionsList.addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                val selected = tagSuggestionsList.selectedValue
-                if (selected != null) {
-                    applyTagSelection(selected.text)
-                }
-            }
-        })
-
-        tagField.addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                if (e.keyCode == KeyEvent.VK_DOWN) {
-                    if (tagPopup?.isVisible == true && tagSuggestionsModel.size() > 0) {
-                        val next = (tagSuggestionsList.selectedIndex + 1).coerceAtMost(tagSuggestionsModel.size() - 1)
-                        tagSuggestionsList.selectedIndex = next
-                        tagSuggestionsList.ensureIndexIsVisible(next)
-                        e.consume()
-                    } else {
-                        showAvailableSystemTags()
-                    }
-                } else if (e.keyCode == KeyEvent.VK_UP) {
-                    if (tagPopup?.isVisible == true && tagSuggestionsModel.size() > 0) {
-                        val prev = (tagSuggestionsList.selectedIndex - 1).coerceAtLeast(0)
-                        tagSuggestionsList.selectedIndex = prev
-                        tagSuggestionsList.ensureIndexIsVisible(prev)
-                        e.consume()
-                    }
-                } else if (e.keyCode == KeyEvent.VK_ENTER || e.keyCode == KeyEvent.VK_TAB) {
-                    if (tagPopup?.isVisible == true && tagSuggestionsList.selectedIndex >= 0) {
-                        val selected = tagSuggestionsList.selectedValue
-                        if (selected != null) {
-                            applyTagSelection(selected.text)
-                            e.consume()
-                        }
-                    }
-                } else if (e.keyCode == KeyEvent.VK_ESCAPE) {
-                    tagPopup?.cancel()
-                }
-            }
-        })
-
-        tagField.document.addDocumentListener(object : DocumentAdapter() {
-            override fun textChanged(e: DocumentEvent) {
-                scheduleTagSearch()
-            }
-        })
+        populate(statusCombo, linkedMapOf("" to "不限状态") + AdvancedSearchQuery.statuses.filterKeys { it !in setOf("solved", "unsolved") || capabilities.solved }, queryModel.filters["status"])
+        populate(orderCombo, AdvancedSearchQuery.orders.filterKeys { (it != "read" || loggedIn) && (it != "votes" || capabilities.votes) }, queryModel.filters["order"])
+        scopeCombo.selectedItem = (0 until scopeCombo.itemCount).map { scopeCombo.getItemAt(it) }.firstOrNull { it.value == queryModel.filters["scope"] } ?: scopeCombo.getItemAt(0)
+        tagContainer.isVisible = capabilities.tagging
+        changing = false
+        morePanel.revalidate(); updatePreview()
     }
-
-    private fun getCurrentTagToken(): String {
-        val full = tagField.text
-        val pos = tagField.caretPosition.coerceIn(0, full.length)
-        val before = full.take(pos)
-        val lastDelim = before.lastIndexOfAny(charArrayOf(',', '，', ' '))
-        return if (lastDelim >= 0) before.substring(lastDelim + 1).trim() else before.trim()
+    private fun loadCapabilities() {
+        val version = SessionEpoch.current
+        val request = ++capabilitiesGeneration
+        featureStatus.text = "正在核对论坛搜索选项…"; featureRetry.isVisible = false
+        tasks.submit {
+            val result = runCatching { DiscourseApiClient.searchCapabilities().getOrThrow() }
+            ApplicationManager.getApplication().invokeLater({
+                if (isDisposed || version != SessionEpoch.current || request != capabilitiesGeneration) return@invokeLater
+                result.onSuccess { queryModel = collect(); capabilities = it; featureStatus.text = ""; configureOptions() }
+                    .onFailure { featureStatus.text = "论坛扩展选项读取失败"; featureStatus.toolTipText = IssueListPanel.formatErrorDisplay(it.message.orEmpty()); featureRetry.isVisible = true }
+            }, ModalityState.any())
+        }
     }
-
-    private fun applyTagSelection(tag: String) {
-        val cleanTag = tag.trim().replace(Regex("""^#+"""), "")
-        val full = tagField.text
-        val pos = tagField.caretPosition.coerceIn(0, full.length)
-        val before = full.take(pos)
-        val after = full.substring(pos)
-        val lastDelim = before.lastIndexOfAny(charArrayOf(',', '，', ' '))
-        val prefix = if (lastDelim >= 0) before.take(lastDelim + 1).trimEnd() + ", " else ""
-        val suffix = if (after.isNotBlank()) " $after" else ""
-        tagField.text = "$prefix$cleanTag$suffix"
-        tagField.caretPosition = (prefix + cleanTag).length
-        tagPopup?.cancel()
-        tagField.requestFocusInWindow()
+    private fun suggestUsers() {
+        userAlarm.cancelAllRequests()
+        val request = ++userGeneration
+        val version = SessionEpoch.current
+        val query = authorField.text.trim().removePrefix("@")
+        authorMatches.isVisible = false
+        if (query.length < 2 || changing) return
+        userAlarm.addRequest({ tasks.submit {
+            val result = DiscourseApiClient.searchUsers(query)
+            ApplicationManager.getApplication().invokeLater({
+                if (isDisposed || version != SessionEpoch.current || request != userGeneration || query != authorField.text.trim().removePrefix("@")) return@invokeLater
+                changing = true; authorMatches.removeAllItems()
+                result.getOrNull().orEmpty().forEach(authorMatches::addItem)
+                authorMatches.selectedIndex = -1; authorMatches.isVisible = authorMatches.itemCount > 0; changing = false
+            }, ModalityState.any())
+        } }, 300, ModalityState.any())
     }
-
-    private fun appendTag(tag: String) {
-        val clean = tag.trim().replace(Regex("""^#+"""), "")
-        val current = tagField.text.trim()
-        if (current.isBlank()) {
-            tagField.text = clean
-        } else {
-            val existing = current.split(Regex("[,，\\s]+")).map { it.trim().replace(Regex("""^#+"""), "") }
-            if (clean in existing) {
-                val remaining = existing.filter { it != clean }
-                tagField.text = remaining.joinToString(", ")
-            } else {
-                tagField.text = "$current, $clean"
-            }
-        }
-        tagField.requestFocusInWindow()
+    private fun collect(): AdvancedSearchQuery {
+        val model = queryModel.copy(text = keywordField.text.trim(), filters = LinkedHashMap(queryModel.filters))
+        fun set(key: String, value: String?) { if (value.isNullOrBlank()) model.filters.remove(key) else model.filters[key] = value }
+        if (categoryTouched) set("category", (categoryCombo.selectedItem as? CategoryItem)?.id?.toString())
+        if (tagContainer.isVisible) set("tags", tagSelector.selection().joinToString(if (allTags.isSelected) "+" else ","))
+        set("author", authorField.text.trim().removePrefix("@"))
+        checks.forEach { (key, box) -> if (box.isVisible) set(key, if (box.isSelected) when { key == "with" -> "images"; key.startsWith("in:") -> key.removePrefix("in:"); else -> "true" } else null) }
+        if (scopeCombo.isVisible) set("scope", (scopeCombo.selectedItem as? Option)?.value)
+        if (statusTouched || model.filters["status"] == null || (0 until statusCombo.itemCount).any { statusCombo.getItemAt(it).value == model.filters["status"] })
+            set("status", (statusCombo.selectedItem as? Option)?.value)
+        if (orderTouched || model.filters["order"] == null || (0 until orderCombo.itemCount).any { orderCombo.getItemAt(it).value == model.filters["order"] })
+            set("order", (orderCombo.selectedItem as? Option)?.value)
+        (dateFields + numberFields).forEach { (key, field) -> set(key, field.text.trim()) }
+        return model
     }
-
-    private fun scheduleTagSearch() {
-        tagAlarm.cancelAllRequests()
-        val currentToken = getCurrentTagToken()
-        if (currentToken.isBlank()) {
-            tagPopup?.cancel()
-            return
-        }
-
-        tagAlarm.addRequest({
-            if (!tagField.isShowing) return@addRequest
-            val query = getCurrentTagToken()
-            if (query.isBlank()) {
-                tagPopup?.cancel()
-                return@addRequest
-            }
-
-            // 1. Local match from popular system tags
-            val service = LinuxDoTopicService.getInstance()
-            val allLocal = (service.popularTags.ifEmpty { LinuxDoTopicService.DEFAULT_SYSTEM_TAGS } + LinuxDoTopicService.DEFAULT_SYSTEM_TAGS).distinct()
-            val localMatches = allLocal.filter { it.contains(query, ignoreCase = true) }
-                .map { TagItem(it, it, 0) }
-
-            if (localMatches.isNotEmpty()) {
-                showTagSuggestions(localMatches.take(10))
-            }
-
-            // 2. Remote match from Discourse tag search
-            service.searchTags(query) { remoteTags ->
-                if (getCurrentTagToken() == query) {
-                    val combined = (remoteTags + localMatches).distinctBy { it.text }
-                    if (combined.isNotEmpty()) {
-                        showTagSuggestions(combined.take(12))
-                    } else if (localMatches.isEmpty()) {
-                        tagPopup?.cancel()
-                    }
-                }
-            }
-        }, 200)
+    private fun updatePreview() {
+        if (changing || isDisposed) return
+        preview.text = collect().query()
     }
-
-    private fun showAvailableSystemTags() {
-        if (!tagField.isShowing) return
-        val currentToken = getCurrentTagToken()
-        val service = LinuxDoTopicService.getInstance()
-        val allLocal = (service.popularTags.ifEmpty { LinuxDoTopicService.DEFAULT_SYSTEM_TAGS } + LinuxDoTopicService.DEFAULT_SYSTEM_TAGS).distinct()
-        val filtered = if (currentToken.isNotBlank()) {
-            allLocal.filter { it.contains(currentToken, ignoreCase = true) }
-        } else {
-            allLocal
-        }
-        val items = filtered.take(15).map { TagItem(it, it, 0) }
-        showTagSuggestions(items)
+    override fun doValidate(): ValidationInfo? {
+        val problem = collect().validate() ?: return null
+        morePanel.isVisible = true
+        val field = dateFields[problem.field] ?: numberFields[problem.field] ?: keywordField
+        field.scrollRectToVisible(Rectangle(field.size)); field.requestFocusInWindow()
+        return ValidationInfo(problem.message, field)
     }
-
-    private fun showTagSuggestions(items: List<TagItem>) {
-        if (items.isEmpty() || !tagField.isShowing) {
-            tagPopup?.cancel()
-            return
-        }
-
-        tagSuggestionsModel.clear()
-        items.forEach { tagSuggestionsModel.addElement(it) }
-        tagSuggestionsList.selectedIndex = 0
-
-        if (tagPopup?.isVisible == true) {
-            tagPopup?.pack(true, true)
-            return
-        }
-
-        val scroll = JBScrollPane(tagSuggestionsList).apply {
-            border = JBUI.Borders.customLine(JBColor.border())
-            preferredSize = Dimension(tagField.width.coerceAtLeast(JBUI.scale(240)), JBUI.scale(150))
-        }
-
-        val popup = JBPopupFactory.getInstance()
-            .createComponentPopupBuilder(scroll, null)
-            .setRequestFocus(false)
-            .setFocusable(false)
-            .setResizable(false)
-            .setMovable(false)
-            .setCancelOnClickOutside(true)
-            .createPopup()
-
-        tagPopup = popup
-        popup.show(RelativePoint(tagField, Point(0, tagField.height)))
-    }
-
-    private fun createQuickTagsPanel(): JComponent {
-        val quickPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 1)).apply {
-            border = JBUI.Borders.empty(2, 0, 2, 0)
-        }
-        val tip = JBLabel("热门标签:").apply {
-            font = font.deriveFont(Font.PLAIN, 11f)
-            foreground = UIUtil.getContextHelpForeground()
-        }
-        quickPanel.add(tip)
-
-        val quickTags = listOf("纯水", "快问快答", "软件开发", "人工智能", "求资源", "配置优化", "VPS", "经验分享")
-        for (tag in quickTags) {
-            val link = ActionLink("#$tag") {
-                appendTag(tag)
-            }.apply {
-                font = font.deriveFont(Font.PLAIN, 11f)
-                toolTipText = "点击添加/切换标签 #$tag"
-            }
-            quickPanel.add(link)
-        }
-
-        val moreLink = ActionLink("全部预载标签...") {
-            tagField.requestFocusInWindow()
-            showAvailableSystemTags()
-        }.apply {
-            font = font.deriveFont(Font.BOLD, 11f)
-            toolTipText = "浏览所有预加载与系统标签"
-        }
-        quickPanel.add(moreLink)
-
-        return quickPanel
-    }
-
-    override fun createCenterPanel(): JComponent {
-        val panel = JPanel(GridBagLayout())
-        panel.preferredSize = Dimension(JBUI.scale(480), JBUI.scale(350))
-        panel.border = JBUI.Borders.empty(8, 12)
-
-        val gbc = GridBagConstraints().apply {
-            fill = GridBagConstraints.HORIZONTAL
-            insets = JBUI.insets(4, 4)
-            anchor = GridBagConstraints.WEST
-        }
-
-        var row = 0
-
-        // Row 0: Keywords
-        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0.0; gbc.gridwidth = 1
-        panel.add(JBLabel("搜索关键词:"), gbc)
-        gbc.gridx = 1; gbc.weightx = 1.0
-        panel.add(keywordField, gbc)
-
-        // Row 1: In Title Checkbox
-        row++
-        gbc.gridx = 1; gbc.gridy = row; gbc.weightx = 1.0
-        panel.add(inTitleCheckBox, gbc)
-
-        // Row 2: Category
-        row++
-        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0.0
-        panel.add(JBLabel("所属版块:"), gbc)
-        gbc.gridx = 1; gbc.weightx = 1.0
-        panel.add(categoryCombo, gbc)
-
-        // Row 3: Tag Input & Quick Suggestions
-        row++
-        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0.0
-        panel.add(JBLabel("指定标签:"), gbc)
-        gbc.gridx = 1; gbc.weightx = 1.0
-        val tagContainer = JPanel(BorderLayout(0, 2)).apply {
-            add(tagField, BorderLayout.CENTER)
-            add(createQuickTagsPanel(), BorderLayout.SOUTH)
-        }
-        panel.add(tagContainer, gbc)
-
-        // Row 4: Author
-        row++
-        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0.0
-        panel.add(JBLabel("发帖作者:"), gbc)
-        gbc.gridx = 1; gbc.weightx = 1.0
-        panel.add(authorField, gbc)
-
-        // Row 5: Sort order
-        row++
-        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0.0
-        panel.add(JBLabel("结果排序:"), gbc)
-        gbc.gridx = 1; gbc.weightx = 1.0
-        panel.add(orderCombo, gbc)
-
-        // Row 6: Time Range
-        row++
-        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0.0
-        panel.add(JBLabel("时间范围:"), gbc)
-        gbc.gridx = 1; gbc.weightx = 1.0
-        panel.add(timeRangeCombo, gbc)
-
-        // Row 7: Min posts count
-        row++
-        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0.0
-        panel.add(JBLabel("最少回复数:"), gbc)
-        gbc.gridx = 1; gbc.weightx = 1.0
-        panel.add(minPostsField, gbc)
-
-        return panel
-    }
-
     override fun doOKAction() {
-        val queryParts = mutableListOf<String>()
-
-        val kw = keywordField.text.trim()
-        if (kw.isNotBlank()) {
-            queryParts.add(kw)
+        val invalid = doValidate()
+        if (invalid != null) { setErrorText(invalid.message); return }
+        onSearch(collect().query()); super.doOKAction()
+    }
+    override fun getPreferredFocusedComponent(): JComponent = keywordField
+    override fun createCenterPanel(): JComponent {
+        val body = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS); border = JBUI.Borders.empty(8, 12) }
+        fun section(label: String, vararg controls: JComponent): JPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS); border = JBUI.Borders.empty(4, 0, 8, 0)
+            add(JBLabel(label).apply { font = font.deriveFont(Font.BOLD); border = JBUI.Borders.empty(0, 0, 5, 0) })
+            controls.forEach { control -> control.alignmentX = Component.LEFT_ALIGNMENT; add(control) }
+            alignmentX = Component.LEFT_ALIGNMENT
         }
-
-        if (inTitleCheckBox.isSelected) {
-            queryParts.add("in:title")
+        val scopeChecks = JPanel(ComposerWrapLayout()).apply { checks.filterKeys { it.removePrefix("in:") in AdvancedSearchQuery.publicScopes || it == "with" }.values.forEach(::add) }
+        body.add(section("关键词与范围", keywordField, scopeChecks, scopeCombo))
+        body.add(section("板块与标签", categoryCombo, tagContainer))
+        body.add(section("作者", authorField, authorMatches))
+        val more = JBCheckBox("更多条件", queryModel.filters.keys.any { it in dateFields || it in numberFields || it == "status" || it == "order" || it.contains("category_expert") || it.removePrefix("in:") in AdvancedSearchQuery.personalScopes })
+        morePanel.isVisible = more.isSelected
+        more.addActionListener { morePanel.isVisible = more.isSelected; morePanel.revalidate() }
+        body.add(more)
+        val personalChecks = JPanel(ComposerWrapLayout()).apply { checks.filterKeys { it.removePrefix("in:") in AdvancedSearchQuery.personalScopes }.values.forEach(::add) }
+        val experts = JPanel(ComposerWrapLayout()).apply { checks.filterKeys { it.contains("category_expert") }.values.forEach(::add) }
+        val dates = JPanel(GridLayout(2, 2, JBUI.scale(6), JBUI.scale(4))).apply {
+            add(JBLabel("帖子日期晚于")); add(dateFields.getValue("after")); add(JBLabel("帖子日期早于")); add(dateFields.getValue("before"))
         }
-
-        val selectedCat = categoryCombo.selectedItem as? CategoryItem
-        if (selectedCat != null && selectedCat.id != null) {
-            val slug = selectedCat.slug ?: selectedCat.name
-            val parentSlug = selectedCat.parentSlug
-            if (!parentSlug.isNullOrBlank()) {
-                queryParts.add("#$parentSlug:$slug")
-            } else {
-                queryParts.add("#$slug")
-            }
+        morePanel.add(section("状态与时间", personalChecks, statusCombo, dates, experts))
+        val counts = JPanel(GridLayout(2, 3, JBUI.scale(6), JBUI.scale(4))).apply {
+            add(JBLabel("帖子数（含首楼）")); add(numberFields.getValue("min_posts")); add(numberFields.getValue("max_posts"))
+            add(JBLabel("话题浏览量")); add(numberFields.getValue("min_views")); add(numberFields.getValue("max_views"))
         }
-
-        val rawTag = tagField.text.trim()
-        if (rawTag.isNotBlank()) {
-            val tags = rawTag.split(Regex("[,，\\s]+"))
-                .map { it.trim().replace(Regex("""^#+"""), "") }
-                .filter { it.isNotBlank() }
-            if (tags.size == 1) {
-                queryParts.add("tag:${tags[0]}")
-            } else if (tags.size > 1) {
-                queryParts.add("tags:${tags.joinToString(",")}")
-            }
-        }
-
-        val author = authorField.text.trim().replace(Regex("""^@+"""), "")
-        if (author.isNotBlank()) {
-            queryParts.add("@$author")
-        }
-
-        val sortOption = orderCombo.selectedItem as? SortOption
-        if (sortOption != null && sortOption.syntax.isNotBlank()) {
-            queryParts.add(sortOption.syntax)
-        }
-
-        val timeOption = timeRangeCombo.selectedItem as? TimeOption
-        if (timeOption != null && timeOption.daysAgo > 0) {
-            val date = LocalDate.now().minusDays(timeOption.daysAgo.toLong())
-            queryParts.add("after:${date.format(DateTimeFormatter.ISO_LOCAL_DATE)}")
-        }
-
-        val minPosts = minPostsField.text.trim().toIntOrNull()
-        if (minPosts != null && minPosts > 0) {
-            queryParts.add("min_posts:$minPosts")
-        }
-
-        val fullQuery = queryParts.joinToString(" ")
-        super.doOKAction()
-        if (fullQuery.isNotBlank()) {
-            onSearch(fullQuery)
+        numberFields.filterKeys { it.startsWith("min_") }.values.forEach { it.toolTipText = "下限（含）" }
+        numberFields.filterKeys { it.startsWith("max_") }.values.forEach { it.toolTipText = "上限（含）" }
+        morePanel.add(section("数量与排序", counts, orderCombo))
+        body.add(morePanel)
+        body.add(section("查询预览", JBScrollPane(preview)))
+        body.add(JPanel(FlowLayout(FlowLayout.LEFT)).apply {
+            add(JButton("重置").apply { addActionListener {
+                changing = true; queryModel = AdvancedSearchQuery(); keywordField.text = ""; authorField.text = ""
+                (dateFields + numberFields).values.forEach { it.text = "" }; checks.values.forEach { it.isSelected = false }
+                tagSelector.setSelection(emptyList()); allTags.isSelected = false; categoryTouched = true; categoryCombo.selectedIndex = 0
+                changing = false; configureOptions(); updatePreview()
+            } })
+            add(JButton("复制查询").apply { addActionListener { CopyPasteManager.getInstance().setContents(StringSelection(collect().query())) } })
+        })
+        body.add(JPanel(BorderLayout()).apply { add(featureStatus); add(featureRetry, BorderLayout.EAST) })
+        body.components.filterIsInstance<JComponent>().forEach { it.alignmentX = Component.LEFT_ALIGNMENT }
+        return JBScrollPane(body).apply {
+            preferredSize = Dimension(JBUI.scale(590), JBUI.scale(610)); border = JBUI.Borders.empty()
+            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+            DialogTheme.follow(disposable, this)
         }
     }
+    override fun dispose() { tasks.dispose(); userAlarm.cancelAllRequests(); super.dispose() }
 }

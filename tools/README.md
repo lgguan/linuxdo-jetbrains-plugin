@@ -7,10 +7,13 @@
 | 文件 | 用途 |
 | --- | --- |
 | `clean-release-build.py` | 在干净目录构建当前源码，比较发布 ZIP 的 SHA-256 |
+| `package-release-source.py` | 打包当前允许列表中的完整源码、测试及验收资料，生成源码清单和安装包/源码包 SHA-256 |
+| `boost-reference-check.py` | 通过已有专用 Chrome 页面只读 GET 对照 `can_boost`、Boost 模型和删除权限；不加载新论坛页面，不发送或撤回 Boost |
 | `smoke.py`、`smoke.init.gradle` | 跨平台检查入口及 Gradle 类路径导出 |
 | `StandaloneSmokeApplication.java`、`PluginCefSmoke.java`、`PortableJcefSmoke.java`、`PaginationSmoke.java` | JCEF 原生渲染、通信、会话、分页与资源释放检查 |
 | `IdePluginSmoke.java` | 在隔离 IDE 中检查安装包类加载 |
 | `IdeUiSmoke.java` | 在真实 IDE 桌面检查回复窗口、草稿交互及正文导航；默认使用内存传输 |
+| `search-reference-check.py` | 通过专用 Chrome CDP 读取 Linux Do 原生高级搜索选项、排序、功能开关与截图；`--check-requests` 另核对公开标签目录和组合列表 GET，遇 429 或验证立即停止 |
 | `draft-handoff.py` | 已授权测试账号的网页与 IDE 草稿接续，限定话题 482293、指定正文，禁止真实发送 |
 | `proxy-migration-smoke.py`、`IdeProxyMigrationSmoke.java` | 用目标 IDE 的实际公共 API 和合成配置检查 HTTP/SOCKS 代理、代理凭据、PasswordSafe 属性及错误信息显示 |
 | `navigation-fixture.py`、`navigation-regression.js` | 浏览器中的长帖导航、频控和窄屏布局回归 |
@@ -43,7 +46,7 @@ Windows 示例：`python tools/smoke.py private --ide-home 'C:\path\to\WebStorm'
 
 独立 JCEF 检查需要桌面会话，Linux CI 可使用 `xvfb-run`。结果位于 `build/portable-smoke/`，成功标记为 `PORTABLE_NATIVE_PASS=true`；联网检查需各项断言通过且进程正常退出。安装包检查结果位于 `build/host-smoke/`；商业 IDE 的许可可能限制完整启动。模拟 Application 的检查不能替代安装包类加载验证，真实账号及桌面交互仍需按[跨平台指南](../docs/cross-platform.md)验收。
 
-`ui` 使用已打包插件中的真实回复窗口、定时器和正文阅读器，输出 `IDE_UI_PASS=true`、断言报告与截图；自动建立空配置，避免首次启动导入个人设置。草稿延迟、断网、409 和发送均由内存传输模拟，并记录 EDT 响应时间。工具不打入插件包。
+`ui` 使用已打包插件中的话题列表、高级搜索、创建与回复窗口、定时器和正文阅读器，输出 `IDE_UI_PASS=true`、断言报告与截图；自动建立空配置，避免首次启动导入个人设置。覆盖标签组合请求、分页、键盘选择与整块鼠标点击、菜单内移除、窄窗口换行、提示状态、主题与缩放。草稿延迟、断网、409 和发送均由内存传输模拟，并记录 EDT 响应时间。工具不打入插件包。
 
 `--showcase` 单独捕获话题阅读、新建话题、按需预览、板块、标签、回复、设置和空白登录窗口，报告同样位于 `build/host-smoke/`。示例草稿只保存在内存；登录窗口可能读取论坛公开页面。截图期间请暂停其他桌面自动化，避免抢占窗口。发布前逐张检查图片，不以截图运行代替完整交互回归。
 

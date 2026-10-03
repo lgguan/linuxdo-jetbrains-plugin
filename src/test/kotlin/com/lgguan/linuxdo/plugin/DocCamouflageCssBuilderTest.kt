@@ -81,7 +81,7 @@ class DocCamouflageCssBuilderTest {
         assertTrue(html.contains("Issue: #9999"))
         assertTrue(html.contains("dev.tuning")) // Namespace formatted
         val metadata = org.jsoup.Jsoup.parse(html).selectFirst(".floor-number")!!
-        assertEquals("#1", metadata.selectFirst(".floor-label")!!.text())
+        assertEquals("#1", metadata.closest(".floor-comment-header")!!.selectFirst(".floor-position .floor-label")!!.text())
         assertEquals("@linuxer", metadata.selectFirst("[data-reader-author]")!!.text())
         assertFalse(metadata.text().contains("Original Specification"))
 
@@ -382,6 +382,7 @@ class DocCamouflageCssBuilderTest {
         val otherPost = Post(
             id = 103,
             username = "other_user",
+            canBoost = true,
             cooked = "<p>Someone else replying</p>",
             postNumber = 3,
             actionsSummary = listOf(ActionSummary(id = 2, count = 2, acted = false, canAct = true))
@@ -424,7 +425,7 @@ class DocCamouflageCssBuilderTest {
         // MUST have like button and boost button
         val floor3Section = html.substringAfter("id=\"floor-3\"")
         assertTrue(floor3Section.contains("toggleLikeUi(this, 103, true)"), "Floor 3 should contain clickable like button")
-        assertTrue(floor3Section.contains("boostPost(103, 3, &quot;other_user&quot;)"), "Floor 3 should contain boost button")
+        assertTrue(floor3Section.contains("data-boost-open"), "Floor 3 should contain permitted boost button")
         assertTrue(floor3Section.contains("replyPost(3, &quot;other_user&quot;)"), "Floor 3 should contain reply button")
         assertTrue(floor3Section.contains("copyPostLink(8888, 3)"), "Floor 3 should contain share button")
     }

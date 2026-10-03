@@ -36,7 +36,6 @@ pre.forum-code-wrap { white-space:pre-wrap; overflow-wrap:anywhere; }
 .hljs-string,.hljs-regexp,.hljs-addition { color:var(--string); }
 .hljs-comment,.hljs-quote { color:var(--comment); }
 .hljs-number,.hljs-symbol,.hljs-built_in,.hljs-title { color:var(--link); }
-.floor-comment-header { display:block; }
 .floor-meta { width:100%; }
 .floor-actions { justify-content:flex-end; align-items:center; margin-top:10px; gap:6px; font:12px var(--code-font-family); }
 .floor-actions button.action-link,.floor-actions summary.action-link,.topic-reader-tools>summary {

@@ -1,0 +1,20 @@
+{
+  "version": "1.0.2",
+  "package": "linuxdo-jetbrains-plugin-1.0.2.zip",
+  "packageSha256": "ee1ea573d3c00eaa3af9ce63dcd80906552683ea93ed79c11e095ac8e46caed6",
+  "desktopTests": {
+    "tests": 339,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "ideUiChecks": 190,
+  "ideUiPass": true,
+  "ideBuild": "IU-262.10968.63",
+  "pluginVerifier": "1.410",
+  "verdict": "Compatible",
+  "layoutChecks": 81,
+  "cleanBuildHashMatches": true,
+  "realForumWrites": 0,
+  "mutationTransport": "isolated in-memory HTTP"
+}

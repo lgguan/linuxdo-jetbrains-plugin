@@ -24,3 +24,5 @@ build/test dependencies and are not included in the plugin.
 # Offline reader assets
 
 The installation package includes highlight.js 11.11.1 (BSD-3-Clause), Mermaid 10.9.3 (MIT), and MathJax 3.2.2 (Apache-2.0). Their full licenses, exact source URLs and SHA-256 digests are in `web/vendor/` inside the plugin JAR. `verifyReaderAssets` checks scripts and license files before packaging. These libraries are served from the plugin resource handler; no runtime CDN requests are made.
+
+Boost counting bundles unchanged emoji name, alias, Unicode and tone metadata from `discourse/discourse-emojis` (MIT gem; downloaded 2026-10-03 from `main/dist/`). No emoji image sets are bundled. Source URLs and SHA-256 digests are in `boost/manifest.json`; the upstream attribution/license collection is retained in `boost/attributions.md`. Data is used offline and extended with the forum's current custom emoji names when opening Boost.

@@ -44,9 +44,9 @@ internal object ComposerCategories {
         categories.forEach { visit(it) }
         return all.values.toList()
     }
-    fun options(categories: List<Category>): List<CategoryItem> {
+    fun options(categories: List<Category>, postingOnly: Boolean = true): List<CategoryItem> {
         val all = flatten(categories).associateBy { it.id }
-        return all.values.filter { it.permission == 1 }.map { category ->
+        return all.values.filter { !postingOnly || it.permission == 1 }.map { category ->
             val names = mutableListOf(category.name)
             val visited = mutableSetOf(category.id)
             var parent = category.parentCategoryId?.let(all::get)
@@ -77,6 +77,8 @@ internal class ComposerCategoryPicker : ComboBox<CategoryItem>() {
         val chosenLabel = JBLabel().apply { border = JBUI.Borders.empty(0, 5) }
         renderer = ListCellRenderer { _, value, _, _, _ ->
             chosenLabel.text = value?.path.orEmpty(); chosenLabel.icon = badge(value)
+            chosenLabel.foreground = foreground
+            chosenLabel.font = font
             chosenLabel
         }
         resultList.selectionMode = ListSelectionModel.SINGLE_SELECTION
@@ -157,6 +159,7 @@ internal class ComposerCategoryPicker : ComboBox<CategoryItem>() {
             })
             add(emptyLabel, BorderLayout.SOUTH)
         }
+        DialogTheme.refresh(content, includeWindow = false)
         val opened = JBPopupFactory.getInstance().createComponentPopupBuilder(content, searchField)
             .setFocusable(true).setRequestFocus(true).setCancelOnClickOutside(true).createPopup()
         popup = opened

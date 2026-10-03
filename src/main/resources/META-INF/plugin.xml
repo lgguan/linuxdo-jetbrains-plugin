@@ -25,6 +25,15 @@
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>1.0.2</h3>
+<ul>
+<li>Boost now uses an inline floor popover and avatar bubbles. Server permissions control sending and withdrawing your own Boost. Grapheme-aware limits, IME composition guards and shared submission locks prevent invalid or duplicate sends.</li>
+<li>Foreground reading measures visible post bodies and independent topic time. A persistent, account-scoped queue retries failed timing batches after login, with bounded batches, request spacing and server cooldowns. Pending synchronization is visible in reading tools.</li>
+<li>Boost updates preserve body nodes and reading position; live IDE color changes preserve popover input.</li>
+<li>楼层号和未读小蓝点移到楼层信息行的最右侧，左侧头像紧邻用户名；已读后楼层信息和正文不再发生位移。</li>
+<li>修复首次打开帖子的可见楼层未自动标记已读：计时依据选中文档、正文可见和 IDE 前台状态，允许输入焦点留在话题列表或工具窗口，后台和隐藏文档仍暂停。</li>
+<li>Expanded advanced search, combined category/tag filtering, consistent tag pickers and live composer theme updates.</li>
+</ul>
 <h3>1.0.1</h3>
 <ul>
 <li>Fixed stale rendering during window resizing, browser startup hangs after disconnection, and blocked Windows IPC cleanup. Failed readers offer retry and restore the cached topic and floor.</li>

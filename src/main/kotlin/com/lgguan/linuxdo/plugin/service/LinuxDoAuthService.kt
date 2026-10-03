@@ -148,6 +148,8 @@ class LinuxDoAuthService(
         val version = sessionVersion
         invokeLoginUiLater {
             if (version != sessionVersion) return@invokeLoginUiLater
+            // Start the application timing queue after verified login even if no reader tab is open.
+            if (user != null) LinuxDoReadTrackingService.getInstance().retrySync()
             for (listener in authListeners) {
                 try {
                     listener(user)

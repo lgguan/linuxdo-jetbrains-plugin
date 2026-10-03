@@ -28,7 +28,7 @@ class TopicReaderFeatureTest {
         assertEquals("    old\n" to "    new\n",TopicReadingService.revisionBodies(diff))
     }
     private val post=Post(id=11,topicId=1,postNumber=2,username="author",cooked="<p>body</p>",raw="body",canEdit=true,canDelete=true,canRecover=true,canViewEditHistory=true,bookmarked=false,
-        actionsSummary=listOf(ActionSummary(2,1,false,true,true),ActionSummary(99,0,false,true)), reactions=emptyList(),canAcceptAnswer=true)
+        actionsSummary=listOf(ActionSummary(2,1,false,true,true),ActionSummary(99,0,false,true)), reactions=emptyList(),canAcceptAnswer=true,canBoost=true)
     private val topic=TopicDetailResponse(1,"Test",postStream=PostStream(listOf(post),listOf(11)),details=TopicPermissions(true,1))
     private val rules=ReaderRules(listOf("heart","tada"),listOf(FlagType(99,"自定义举报","社区配置",true)),setOf("members"),true,false)
     private fun input(vararg values:Pair<String,Any?>)=JsonObject().apply { values.forEach { (key,value)->add(key,Gson().toJsonTree(value)) } }
@@ -226,7 +226,7 @@ ${'$'}not_math${'$'}
             assertTrue(html.contains("__linuxdo_plugin_assets/"));assertFalse(html.contains("cdn.jsdelivr.net"))
             val simplePosts=listOf(
                 Post(id=1,postNumber=1,username="sample_author",yours=true,cooked="<p>整理了一份开发笔记，欢迎交流。</p>",bookmarked=false),
-                Post(id=2,postNumber=2,username="community_member",yours=false,cooked="<p>感谢分享，期待后续更新。</p>",bookmarked=false,actionsSummary=listOf(ActionSummary(2,0,false,true,true),ActionSummary(99,0,false,true))))
+                Post(id=2,postNumber=2,username="community_member",yours=false,cooked="<p>感谢分享，期待后续更新。</p>",bookmarked=false,canBoost=true,actionsSummary=listOf(ActionSummary(2,0,false,true,true),ActionSummary(99,0,false,true))))
             val simpleTopic=topic.copy(title="开发笔记与交流",highestPostNumber=2,postStream=PostStream(simplePosts,listOf(1,2)))
             val simpleConfig=config + mapOf("stream" to listOf("1","2"),"highest" to 2,"unreadFloor" to null,"author" to "sample_author")
             Files.writeString(Path.of("build/layout-reader-$dark.html"),TopicDocumentRenderer.buildFullDocHtml(simpleTopic,simplePosts,"开发","dev",theme,LinuxDoSettingsState(),currentUsername="reader",paginationScript="window.linuxDoPage="+Gson().toJson(simpleConfig)+";"+javaClass.getResource("/web/topic-pagination.js")!!.readText()))

@@ -4,6 +4,23 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
 object DiscourseUrls {
+    fun topicList(baseUrl: String, filter: Constants.TopicFilter, categorySlug: String? = null,
+        categoryId: Int? = null, page: Int = 0, tag: String? = null): String {
+        fun encode(value: String) = URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20")
+        val list = when (filter) { Constants.TopicFilter.TOP, Constants.TopicFilter.HOT -> "top"; else -> filter.key }
+        val category = if (categoryId == null) "" else "${categorySlug?.takeIf { it.isNotBlank() }?.let { encode(it) + "/" }.orEmpty()}$categoryId"
+        val path = when {
+            !tag.isNullOrBlank() && categoryId != null -> "/tags/c/$category/${encode(tag)}/l/$list.json"
+            !tag.isNullOrBlank() -> "/tag/${encode(tag)}/l/$list.json"
+            categoryId != null -> "/c/$category/l/$list.json"
+            else -> "/$list.json"
+        }
+        val period = when (filter) { Constants.TopicFilter.TOP -> "&period=weekly"; Constants.TopicFilter.HOT -> "&period=daily"; else -> "" }
+        return "$baseUrl$path?page=$page$period"
+    }
+
+    fun browseTags(baseUrl: String, query: String): String =
+        "$baseUrl/tags/filter/search.json?q=${URLEncoder.encode(query.trim(), StandardCharsets.UTF_8)}&filterForInput=false"
     fun latest(baseUrl: String, page: Int = 0): String {
         return "$baseUrl/latest.json?page=$page"
     }

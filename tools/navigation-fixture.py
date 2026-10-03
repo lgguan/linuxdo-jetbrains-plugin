@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 output = ROOT / "output/playwright"
 output.mkdir(parents=True, exist_ok=True)
 document = (ROOT / "build/topic-media-false.html").read_text(encoding="utf-8")
-css = re.search(r"<style>(.*?)</style>", document, re.S).group(1)
+css = re.search(r"<style\b[^>]*>(.*?)</style>", document, re.S).group(1)
 source = (ROOT / "src/main/resources/web/topic-pagination.js").read_text(encoding="utf-8")
 setup = r"""
 window.calls = [];

@@ -1,0 +1,102 @@
+{
+  "checks": [
+    {
+      "path": "/tags.json",
+      "status": 200,
+      "retryAfter": null,
+      "verificationRequired": false,
+      "tagCount": 1820,
+      "groups": [
+        {
+          "name": "推广标签",
+          "count": 1
+        },
+        {
+          "name": "活动专用",
+          "count": 3
+        },
+        {
+          "name": "特殊标签",
+          "count": 9
+        },
+        {
+          "name": "社区官方",
+          "count": 11
+        },
+        {
+          "name": "类版块组",
+          "count": 35
+        },
+        {
+          "name": "编程语言",
+          "count": 12
+        },
+        {
+          "name": "网盘A组",
+          "count": 14
+        },
+        {
+          "name": "网盘B组",
+          "count": 3
+        }
+      ],
+      "topicCount": null,
+      "tagSample": [
+        {
+          "id": 1,
+          "text": "ssl",
+          "name": "ssl",
+          "slug": "ssl",
+          "description": null,
+          "count": 22,
+          "pm_only": false,
+          "target_tag": null
+        },
+        {
+          "id": 2,
+          "text": "https",
+          "name": "https",
+          "slug": "https",
+          "description": null,
+          "count": 8,
+          "pm_only": false,
+          "target_tag": null
+        },
+        {
+          "id": 3,
+          "text": "ChatGPT",
+          "name": "ChatGPT",
+          "slug": "chatgpt",
+          "description": null,
+          "count": 29082,
+          "pm_only": false,
+          "target_tag": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "/tags/c/4/%E7%BA%AF%E6%B0%B4/l/top.json?page=0&period=daily",
+      "status": 200,
+      "retryAfter": null,
+      "verificationRequired": false,
+      "tagCount": null,
+      "groups": null,
+      "topicCount": 30,
+      "tagSample": null,
+      "errors": []
+    },
+    {
+      "path": "/tags/c/4/%E7%BA%AF%E6%B0%B4/l/unread.json?page=0",
+      "status": 200,
+      "retryAfter": null,
+      "verificationRequired": false,
+      "tagCount": null,
+      "groups": null,
+      "topicCount": 0,
+      "tagSample": null,
+      "errors": []
+    }
+  ],
+  "writes": 0
+}

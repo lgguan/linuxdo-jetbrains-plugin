@@ -7,6 +7,12 @@ import org.junit.jupiter.api.Test
 import java.io.IOException
 
 class ForumReadCooldownTest {
+    @Test fun `forum JSON 429 cooldown and Cloudflare challenge stay distinct`() {
+        val failure=com.lgguan.linuxdo.plugin.net.HttpFailure
+        assertEquals(75,(failure.classify(429,emptyMap(),"""{"error_type":"rate_limit","extras":{"wait_seconds":75}}""") as RateLimitException).retryAfterSeconds)
+        assertEquals(90,(failure.classify(429,mapOf("Retry-After" to "90"),"""{"extras":{"wait_seconds":75}}""") as RateLimitException).retryAfterSeconds)
+        assertTrue(failure.classify(429,mapOf("cf-mitigated" to "challenge"),"Cloudflare") is com.lgguan.linuxdo.plugin.net.CloudflareChallengeException)
+    }
     @Test fun `429 blocks subsequent readers until Retry-After without extending it`() {
         var now = 10_000L
         val cooldown = ForumReadCooldown { now }

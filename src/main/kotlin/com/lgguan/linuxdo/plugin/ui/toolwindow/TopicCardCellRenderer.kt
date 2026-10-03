@@ -18,6 +18,8 @@ class TopicCardCellRenderer : ListCellRenderer<Topic> {
     private val titleLabel = CustomLabel()
     private val metaLabel = CustomLabel()
     private val summaryLabel = CustomLabel()
+    private val tagPanel = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(5), 0)).apply { isOpaque = false }
+    private val footer = JPanel(BorderLayout()).apply { isOpaque = false; add(metaLabel, BorderLayout.NORTH); add(tagPanel, BorderLayout.SOUTH) }
 
     init {
         panel.border = JBUI.Borders.empty(6, 10)
@@ -27,7 +29,7 @@ class TopicCardCellRenderer : ListCellRenderer<Topic> {
         metaLabel.isOpaque = false
 
         panel.add(titleLabel, BorderLayout.NORTH)
-        panel.add(metaLabel, BorderLayout.SOUTH)
+        panel.add(footer, BorderLayout.SOUTH)
         panel.add(summaryLabel, BorderLayout.CENTER)
     }
 
@@ -89,9 +91,8 @@ class TopicCardCellRenderer : ListCellRenderer<Topic> {
 
         // Meta info line: namespace • replies • views • time
         val timeText = com.lgguan.linuxdo.plugin.theme.RelativeTime.format(value.lastPostedAt ?: value.bumpedAt ?: value.createdAt)
-        val tags = value.tags.orEmpty().joinToString(" ") { "#${it.name}" }
         val unread = if (value.unreadPosts > 0) "${value.unreadPosts} 未读" else if (value.unseen) "新话题" else ""
-        val metaText = listOf(namespace, tags, unread, "${value.replyCount} replies", timeText).filter { it.isNotBlank() }.joinToString(" | ")
+        val metaText = listOf(namespace, unread, "${value.replyCount} replies", timeText).filter { it.isNotBlank() }.joinToString(" | ")
         metaLabel.text = metaText
         metaLabel.foreground = if (isSelected) {
             Color(Integer.valueOf(theme.selectionFgHex.removePrefix("#"), 16))
@@ -102,8 +103,24 @@ class TopicCardCellRenderer : ListCellRenderer<Topic> {
         summaryLabel.isVisible = summaryLabel.text.isNotBlank()
         summaryLabel.font = metaFont
         summaryLabel.foreground = metaLabel.foreground
+        tagPanel.removeAll()
+        value.tags.orEmpty().forEach { tag -> tagPanel.add(CustomLabel().apply {
+            text = "#${tag.name}"; font = metaFont
+            foreground = if (isSelected) metaLabel.foreground else Color.decode(theme.linkHex)
+            toolTipText = "按标签「${tag.name}」筛选"
+        }) }
+        tagPanel.isVisible = !value.tags.isNullOrEmpty()
 
         return panel
+    }
+
+    fun tagAt(list: JList<out Topic>, topic: Topic, index: Int, point: Point, size: Dimension): String? {
+        getListCellRendererComponent(list, topic, index, list.selectedIndex == index, false)
+        panel.size = size; panel.doLayout(); footer.doLayout(); tagPanel.doLayout()
+        val origin = javax.swing.SwingUtilities.convertPoint(tagPanel, 0, 0, panel)
+        return tagPanel.components.mapIndexedNotNull { i, component ->
+            if (Rectangle(origin.x + component.x, origin.y + component.y, component.width, component.height).contains(point)) topic.tags?.getOrNull(i)?.name else null
+        }.firstOrNull()
     }
 
     private fun unescapeHtml(text: String): String {

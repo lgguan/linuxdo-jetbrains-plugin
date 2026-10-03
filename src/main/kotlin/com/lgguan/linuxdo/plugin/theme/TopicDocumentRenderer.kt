@@ -169,20 +169,25 @@ object TopicDocumentRenderer {
                         }
                     };
 
+                    var readingScrollSequence = 0;
+                    addEventListener('scroll', function() { readingScrollSequence++; }, {passive:true});
                     window.sampleDocReading = function() {
-                        var floors = [];
-                        if (document.visibilityState === 'visible' && document.hasFocus()) {
+                        var floors = [], bodyVisible = false;
+                        // The host checks selected editor, visible body and foreground IDE.
+                        // OSR input focus can remain in the topic list on the first opening.
+                        if (document.visibilityState === 'visible') {
                             var navigation = document.querySelector('.topic-navigation');
                             var readingBottom = navigation ? Math.min(window.innerHeight, navigation.getBoundingClientRect().top) : window.innerHeight;
-                            document.querySelectorAll('.post-entry').forEach(function(el) {
+                            document.querySelectorAll('.post-content').forEach(function(el) {
                                 var r = el.getBoundingClientRect();
                                 var visible = Math.min(r.bottom, readingBottom) - Math.max(r.top, 0);
+                                if (visible > 0 && r.right > 0 && r.left < window.innerWidth) bodyVisible = true;
                                 if (visible >= Math.min(r.height, readingBottom) * 0.5 && r.right > 0 && r.left < window.innerWidth) {
-                                    floors.push(parseInt(el.getAttribute('data-post-number'), 10));
+                                    floors.push(parseInt(el.closest('.post-entry').getAttribute('data-post-number'), 10));
                                 }
                             });
                         }
-                        if (window.intellijBridge) window.intellijBridge.readingSample(floors);
+                        if (window.intellijBridge) window.intellijBridge.readingSample(floors, readingScrollSequence, bodyVisible);
                     };
                     window.observeDocPosts = function() {};
 
@@ -857,7 +862,7 @@ object TopicDocumentRenderer {
             } else ""
 
             val time = """<time class="relative-time" datetime="${escapeHtml(post.createdAt ?: "")}" title="${escapeHtml(post.createdAt ?: "")}">${RelativeTime.format(post.createdAt)}</time>"""
-            val floorComment = """<span class="floor-label">#${post.postNumber}</span><span class="action-link" data-reader-author="$author">@$author</span>$inReplyText$time"""
+            val floorComment = """<span class="action-link" data-reader-author="$author">@$author</span>$inReplyText$time"""
 
             val isMyPost = post.yours == true
 
@@ -872,8 +877,8 @@ object TopicDocumentRenderer {
                 val likedClass = if (isLiked) "action-link liked" else "action-link"
                 val countHtml = if (likeCount > 0) "<span class=\"action-count\">$likeCount</span>" else ""
                 actionItems.add("""<button type="button" class="$likedClass" title="$likeText" aria-label="$likeText" aria-pressed="$isLiked" onclick="toggleLikeUi(this, ${post.id}, ${!isLiked})">${ReaderIcons.svg("like")}$countHtml</button>""")
-                if (com.lgguan.linuxdo.plugin.model.PostCapabilities.reply(topic)) actionItems.add("""<button type="button" class="action-link" data-post-command="boost" title="Boost：点赞并回复" aria-label="Boost" onclick="window.intellijBridge && window.intellijBridge.boostPost(${post.id}, ${post.postNumber}, $authorJs)">${ReaderIcons.svg("boost")}</button>""")
             }
+            if (post.canBoost == true && post.boosts.isNullOrEmpty()) actionItems.add(boostEntry())
             if (com.lgguan.linuxdo.plugin.model.PostCapabilities.reply(topic)) actionItems.add("""<button type="button" class="action-link" title="回复" aria-label="回复" onclick="window.intellijBridge && window.intellijBridge.replyPost(${post.postNumber}, $authorJs)">${ReaderIcons.svg("reply")}</button>""")
             moreItems.add("""<button type="button" class="action-link" data-post-command="share" onclick="window.intellijBridge && window.intellijBridge.copyPostLink(${topic.id}, ${post.postNumber})">${ReaderIcons.svg("share")}<span>分享</span></button>""")
             fun control(action: String, label: String, enabled: Boolean, direction: String? = null) {
@@ -913,13 +918,14 @@ object TopicDocumentRenderer {
                     <a id="post-num-${post.postNumber}"></a>
                     <div class="floor-comment-header">
                         <div class="floor-meta">
-                            $dotHtml$avatarHtml<span class="floor-number">$floorComment</span>
+                            $avatarHtml<span class="floor-number">$floorComment</span>
                         </div>
+                        <div class="floor-position"><span class="floor-label">#${post.postNumber}</span><span class="floor-read-indicator">$dotHtml</span></div>
                     </div>
                     <div class="post-content" data-source="${java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest((post.cooked + "\u0000" + post.raw.orEmpty()).toByteArray()))}">
                         ${ForumContent.render(ScrollableSourceBlocks.render(post.cooked, post.raw), settings.foldImages, post.id.toString(), "https://linux.do/t/${topic.id}/${post.postNumber}")}
                     </div>
-                    ${renderBoosts(post)}
+                    ${renderBoosts(post,currentUsername)}
                     <div class="floor-actions" aria-label="帖子操作">
                         $actionsHtml
                     </div>
@@ -990,16 +996,29 @@ object TopicDocumentRenderer {
 
     fun processContent(cooked: String, foldImages: Boolean): String = ForumContent.render(cooked, foldImages)
 
-    private fun renderBoosts(post: Post): String {
+    private fun boostEntry() = """<button type="button" class="action-link" data-post-command="boost" data-boost-open title="发送 Boost" aria-label="Boost">${ReaderIcons.svg("boost")}</button>"""
+
+    private fun renderBoosts(post: Post, currentUsername: String?): String {
         val boosts = post.boosts
         if (boosts.isNullOrEmpty()) return ""
         val items = boosts.filterNotNull().mapNotNull { b ->
             val user = escapeHtml(b.getDisplayUsername())
-            val content = escapeHtml(b.getDisplayContent())
-            if (content.isBlank()) null else "<span class=\"boost-tag\">🚀 @$user: $content</span>"
+            val safe = org.jsoup.safety.Safelist().addTags("p","span","br","img")
+                .addAttributes("img","src","alt","title","class").addProtocols("img","src","https","http").preserveRelativeLinks(true)
+            val content = org.jsoup.Jsoup.parseBodyFragment(org.jsoup.Jsoup.clean(b.cooked ?: escapeHtml(b.raw ?: b.content.orEmpty()),"https://linux.do/",safe)).apply {
+                outputSettings().prettyPrint(false)
+                select("img:not(.emoji)").remove()
+                select("img").forEach { it.attr("src",normalizeUrl(it.attr("src"))) }
+            }.body().html()
+            val avatar = b.user?.avatarTemplate?.replace("{size}","24")?.takeIf { it.isNotBlank() }?.let {
+                """<img class="boost-avatar" src="${escapeHtml(normalizeUrl(it))}" alt="" loading="lazy">"""
+            } ?: """<span class="boost-avatar boost-initial">${escapeHtml(b.getDisplayUsername().take(1))}</span>"""
+            val delete = if (b.canDelete==true && b.id!=null && currentUsername!=null && b.getDisplayUsername().equals(currentUsername,true))
+                """<button type="button" class="action-link boost-delete" data-boost-delete="${b.id}" title="撤回自己的 Boost" aria-label="撤回自己的 Boost">×</button>""" else ""
+            if (content.isBlank()) null else """<span class="boost-bubble" data-boost-id="${b.id ?: ""}"><button type="button" class="boost-user" data-reader-author="$user" title="@$user" aria-label="查看 @$user 的资料">$avatar</button><span class="boost-content">$content</span>$delete</span>"""
         }.joinToString("")
         if (items.isBlank()) return ""
-        return "<div class=\"boost-container\">$items</div>"
+        return "<div class=\"boost-container\">$items${if(post.canBoost==true)boostEntry() else ""}</div>"
     }
 
     internal fun escapeHtml(text: String): String {

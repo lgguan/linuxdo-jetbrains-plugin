@@ -222,6 +222,10 @@ class CommitReplyDialog private constructor(
         }, BorderLayout.SOUTH)
 
         setupEventListeners()
+        ComposerAppearance.followTheme(disposable, rootPanel, textArea, editorPanel) {
+            updateValidation()
+            previewView.refreshTheme()
+        }
         schedulePreviewUpdate()
 
         return rootPanel
@@ -229,7 +233,7 @@ class CommitReplyDialog private constructor(
 
     private fun createBannerPanel(): JPanel {
         val banner = JPanel(BorderLayout()).apply {
-            background = UIUtil.getPanelBackground()
+            background = JBColor.namedColor("Panel.background", UIUtil.getPanelBackground())
             border = CompoundBorder(
                 JBUI.Borders.customLine(JBColor.border(), 1),
                 JBUI.Borders.empty(6, 10)

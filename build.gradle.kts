@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.lgguan.linuxdo"
-version = "1.0.1"
+version = "1.0.2"
 
 repositories {
     mavenCentral()
@@ -63,6 +63,21 @@ tasks {
         }
     }
     processResources { dependsOn(verifyReaderAssets) }
+    val verifyBoostAssets by registering {
+        val metadata = layout.projectDirectory.dir("src/main/resources/boost")
+        inputs.dir(metadata)
+        doLast {
+            val manifest = groovy.json.JsonSlurper().parse(metadata.file("manifest.json").asFile) as List<*>
+            manifest.forEach { value ->
+                val item = value as Map<*, *>
+                val resource = metadata.file(item["file"] as String).asFile
+                val digest = MessageDigest.getInstance("SHA-256").digest(resource.readBytes())
+                    .joinToString("") { "%02x".format(it) }
+                check(digest == item["sha256"]) { "Boost metadata checksum mismatch: ${resource.name}" }
+            }
+        }
+    }
+    processResources { dependsOn(verifyBoostAssets) }
     runPluginVerifier {
         // Real binary/API verification, separate from verifyPlugin's ZIP/descriptor checks.
         val localIde = providers.gradleProperty("verifierIdePath")

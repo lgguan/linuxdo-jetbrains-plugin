@@ -35,7 +35,7 @@ def main():
                 check('boost is primary and share is secondary',page.locator('#floor-2 .floor-actions > [data-post-command=boost]').count()==1 and page.locator('.floor-actions > [data-post-command=share],.post-actions-menu-items [data-post-command=boost]').count()==0 and page.locator('.post-actions-menu-items [data-post-command=share]').count()==2)
                 check('primary icons have accessible labels',page.locator('.floor-actions > button').evaluate_all("items=>items.every(b=>b.querySelector('svg.reader-icon') && b.getAttribute('aria-label') && b.title)"))
                 check('reading tools are anchored to document header',page.locator('.topic-reader-tools').evaluate("el=>{const r=el.getBoundingClientRect(),h=el.closest('.doc-header').getBoundingClientRect();return getComputedStyle(el).position==='absolute'&&Math.abs(r.top-h.top)<2&&Math.abs(r.right-h.right)<2&&!el.closest('.topic-navigation')}"))
-                check('floor metadata is concise',page.locator('.floor-number').evaluate_all("items=>items.every(el=>el.querySelector('.floor-label')&&el.querySelector('[data-reader-author]')&&!/Original Specification|Revision|---/.test(el.textContent))"))
+                check('floor metadata is concise',page.locator('.floor-number').evaluate_all("items=>items.every(el=>el.closest('.floor-comment-header').querySelector('.floor-position .floor-label')&&el.querySelector('[data-reader-author]')&&!/Original Specification|Revision|---/.test(el.textContent))"))
                 check('bookmark has one icon without stars',page.locator('[data-reader-action=bookmark]').evaluate_all("items=>items.every(el=>el.querySelectorAll('svg').length===1&&!/[★☆]/.test(el.textContent)&&el.textContent==='收藏')"))
                 page.evaluate('linuxDoPagination.jump(2)');page.wait_for_timeout(80)
                 check('location status and floor shortcuts share a row',page.evaluate("(()=>{const a=document.querySelector('.topic-navigation-status').getBoundingClientRect(),b=document.querySelector('.floor-jump-controls').getBoundingClientRect();return !document.querySelector('.topic-navigation-status').hidden && Math.abs((a.top+a.bottom)/2-(b.top+b.bottom)/2)<2})()"))
@@ -59,13 +59,30 @@ def main():
                 check('open reading menu follows dynamic resize',page.locator('.topic-reader-menu').evaluate('(el)=>{const r=el.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight}') and page.locator('.topic-reader-tools').evaluate('el=>{const r=el.getBoundingClientRect(),h=el.closest(".doc-header").getBoundingClientRect();return Math.abs(r.right-h.right)<2}'))
                 check('dynamic resize reflows content without overflow',page.evaluate('document.documentElement.scrollWidth<=innerWidth&&document.querySelector(".doc-container").getBoundingClientRect().right<=innerWidth'))
                 page.set_viewport_size({'width':width,'height':height});page.wait_for_timeout(150)
+                check('unread dots sit at right edge of metadata',page.locator('.unread-dot').evaluate_all("dots=>dots.length===2&&dots.every(dot=>{const r=dot.getBoundingClientRect(),h=dot.closest('.floor-comment-header').getBoundingClientRect();return Math.abs(r.right-h.right)<2})"))
+                page.evaluate("window.beforeReadPositions=[...document.querySelectorAll('.floor-number,.floor-position,.post-content')].map(el=>{const r=el.getBoundingClientRect();return [r.left,r.top,r.width,r.height]})")
                 check('read acknowledgment advances only contiguous unread floors',page.evaluate("(()=>{linuxDoReaderResult('fixture','unused',{topic:{unreadFloor:1}});applyDocRead([2]);const kept=linuxDoPage.unreadFloor===1;applyDocRead([1]);return kept&&linuxDoPage.unreadFloor===null&&[...document.querySelectorAll('.unread-dot')].every(el=>getComputedStyle(el).display==='none')&&[...document.querySelectorAll('.topic-reader-menu button')].find(el=>el.textContent==='未读').hidden})()"))
+                check('reading hides dots without moving metadata or body',page.evaluate("[...document.querySelectorAll('.floor-number,.floor-position,.post-content')].every((el,i)=>{const r=el.getBoundingClientRect();return [r.left,r.top,r.width,r.height].every((n,j)=>Math.abs(n-beforeReadPositions[i][j])<.1)})"))
                 page.evaluate("linuxDoReaderResult('fixture','unused',{topic:{loggedIn:false,notificationLevel:null}})")
                 check('account controls disappear when unavailable',not page.get_by_role('button',name='通知',exact=True).count() and not page.get_by_role('button',name='我的书签',exact=True).count())
                 page.evaluate("document.querySelector('.post-content').insertAdjacentHTML('beforeend','<h2>新的标题</h2>')")
                 page.wait_for_timeout(60)
                 check('directory appears when headings become available',page.get_by_role('button',name='目录',exact=True).count()==1)
                 check('no writes or javascript errors',not errors and page.evaluate('readerCalls.length===0'))
+                # The previous jump target remains visible below the body now being read.
+                # Inserting Boosts must preserve that body's position, not the jump target.
+                page.evaluate("""()=>{
+                    document.querySelectorAll('.post-content').forEach(body=>body.innerHTML='<p>短正文</p>');
+                    linuxDoPagination.jump(2);
+                    const body=document.querySelector('#floor-1 .post-content');
+                    scrollTo(0,scrollY+body.getBoundingClientRect().top-80);
+                    window.localPatchBody=body;window.localPatchTop=body.getBoundingClientRect().top;
+                    const copy=document.querySelector('#floor-1').cloneNode(true),boosts=document.createElement('div');
+                    boosts.className='boost-container';boosts.style.height='46px';boosts.textContent='👍 模拟 Boost';
+                    copy.querySelector('.floor-actions').before(boosts);linuxDoPagination.patch(copy.outerHTML);
+                }""")
+                page.wait_for_timeout(120)
+                check('boost patch anchors visible body after navigation',page.evaluate('localPatchBody===document.querySelector("#floor-1 .post-content")&&Math.abs(localPatchBody.getBoundingClientRect().top-localPatchTop)<2'))
                 context.close()
         finally:browser.close()
     (OUT/'result.json').write_text(json.dumps({'passed':len(checks),'checks':checks},ensure_ascii=False,indent=2),encoding='utf-8')

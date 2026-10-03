@@ -249,13 +249,15 @@ class MarketplaceSafetyTest {
         assertTrue(service.isPostRead(1, 10, false, null))
     }
 
-    @Test fun `reading measures only foreground dwell and batches without multiplying elapsed time`() {
+    @Test fun `reading measures foreground topic time independently of each visible floor`() {
         var nanos = 0L
         val clock = ReadingClock { nanos }
         clock.sample(setOf(2, 9), true)
         repeat(15) { nanos += 1_000_000_000; clock.sample(setOf(2, 9), true) }
         assertTrue(clock.due())
-        assertEquals(mapOf(2 to 7500L, 9 to 7500L), clock.drain())
+        val batch = clock.drain()
+        assertEquals(mapOf(2 to 15000L, 9 to 15000L), batch.timings)
+        assertEquals(15000L,batch.topicTimeMs)
         assertFalse(clock.due())
         nanos += 1_000_000_000
         clock.sample(setOf(2, 9), false)

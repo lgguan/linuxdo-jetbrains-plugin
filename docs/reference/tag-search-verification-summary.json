@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-03",
+  "unitTests": {
+    "tests": 321,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "ideChecks": 162,
+  "ideUiPass": true,
+  "ideBuild": "IU-262.10968.63",
+  "verifier": "Compatible",
+  "zipSha256": "87b3034453ba9ebccea736ec7a115af2f234047308336da3d2d932b801b16c3e",
+  "realForumWrites": 0,
+  "cleanBuild": {
+    "passed": true,
+    "directory": "build/release-check/da43fcd6-41d3-4d8f-be0d-2e54d3efe5f9",
+    "zipIdentical": true,
+    "unitTests": {
+      "tests": 321,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2
+    }
+  },
+  "realForumWritesScope": "162-check isolated IDE regression; real draft handoff is recorded separately",
+  "liveDraftHandoff": {
+    "passed": true,
+    "currentPackage": true,
+    "ownedDraftCleared": true,
+    "postSubmitted": false,
+    "transport": "browser_authenticated_draft_only; production UI and draft session"
+  },
+  "liveSearchRead": {
+    "passed": true,
+    "requestCount": 7,
+    "writes": 0,
+    "personalMessageSearchAndRead": true,
+    "privateContentPersisted": false
+  }
+}

@@ -209,6 +209,10 @@ public class IdeUiSmoke implements ApplicationStarter {
     BufferedImage image = new Robot().createScreenCapture(bounds);
     ImageIO.write(image, "png", output.resolve(name + ".png").toFile());
   }
+  private static JComboBox<?> tagPicker(Window window) {
+    return components(window).stream().filter(c -> c instanceof JComboBox && "composer-tag-picker".equals(c.getName()))
+      .map(c -> (JComboBox<?>)c).findFirst().orElseThrow();
+  }
   private static void tagPopupScreenshot(DialogWrapper dialog, String name) throws Exception {
     Rectangle bounds=edt(() -> {
       JComponent content=((com.intellij.openapi.ui.popup.JBPopup)field(dialog,"tagPopup")).getContent();
@@ -438,18 +442,24 @@ public class IdeUiSmoke implements ApplicationStarter {
     return topic;
   }
   private static void showcaseCapture(Window window,String name) throws Exception {
+    showcaseCapture(window,name,false);
+  }
+  private static void showcaseCapture(Window window,String name,boolean expectedLightSurface) throws Exception {
     edt(() -> {window.setAlwaysOnTop(true);return null;});
     if(!edt(() -> window.isActive() || Arrays.stream(window.getOwnedWindows()).anyMatch(Window::isActive))) {
       Robot focus=new Robot();focus.keyPress(java.awt.event.KeyEvent.VK_ALT);focus.keyRelease(java.awt.event.KeyEvent.VK_ALT);
       edt(() -> {window.toFront();window.requestFocus();return null;});
     }
     await("showcase window foreground",() -> window.isActive() || Arrays.stream(window.getOwnedWindows()).anyMatch(Window::isActive));
+    Point title=edt(()->{Point p=window.getLocationOnScreen();p.translate(80,12);return p;});
+    new Robot().mouseMove(title.x,title.y);
+    edt(()->{ToolTipManager.sharedInstance().setEnabled(false);ToolTipManager.sharedInstance().setEnabled(true);return null;});
     edt(() -> {window.repaint();return null;});
     Thread.sleep(600);
     Rectangle bounds=edt(() -> {Rectangle b=window.getBounds();b.x+=8;b.width-=16;b.height-=8;return b;});
     BufferedImage captured=new Robot().createScreenCapture(bounds);
     Color center=new Color(captured.getRGB(captured.getWidth()/2,captured.getHeight()/2));
-    if(center.getRed()+center.getGreen()+center.getBlue()>650) throw new AssertionError("Showcase window is obscured: "+name);
+    if(!expectedLightSurface && com.intellij.ui.ColorUtil.isDark(com.intellij.util.ui.UIUtil.getPanelBackground()) && center.getRed()+center.getGreen()+center.getBlue()>650) throw new AssertionError("Showcase window is obscured: "+name);
     ImageIO.write(captured,"png",output.resolve(name+".png").toFile());
     report.println("SCREENSHOT="+name+".png");
   }
@@ -512,7 +522,7 @@ public class IdeUiSmoke implements ApplicationStarter {
     Thread.sleep(700);showcaseCapture(topic.getWindow(),"create-topic-preview");
     edt(() -> {button(topic.getWindow(),"composer-preview").doClick();((JComboBox<?>)field(topic,"categoryComboBox")).showPopup();return null;});
     showcaseCapture(topic.getWindow(),"category-picker");
-    edt(() -> {((JComboBox<?>)field(topic,"categoryComboBox")).hidePopup();button(topic.getWindow(),"composer-tag-picker").doClick();return null;});
+    edt(() -> {((JComboBox<?>)field(topic,"categoryComboBox")).hidePopup();tagPicker(topic.getWindow()).showPopup();return null;});
     await("showcase tag candidates",() -> ((DefaultListModel<?>)field(topic,"tagSuggestionsModel")).size()==9);
     clickTag(topic,"人工智能");clickTag(topic,"ChatGPT");
     await("showcase chosen tags",() -> okEnabled(topic) && ((JLabel)field(topic,"tagPickerStatus")).getText().contains("已选"));
@@ -542,6 +552,8 @@ public class IdeUiSmoke implements ApplicationStarter {
     volatile CountDownLatch entered=new CountDownLatch(1), release=new CountDownLatch(1), finished=new CountDownLatch(1);
     final List<String> requests=new CopyOnWriteArrayList<>();
     final List<okhttp3.HttpUrl> tagRequests=new CopyOnWriteArrayList<>();
+    final List<okhttp3.HttpUrl> listRequests=new CopyOnWriteArrayList<>();
+    volatile boolean failBrowseTags;
     int writes;
     void hold(String query) { heldQuery=query;entered=new CountDownLatch(1);release=new CountDownLatch(1);finished=new CountDownLatch(1); }
     public okhttp3.Response intercept(okhttp3.Interceptor.Chain chain) throws IOException {
@@ -551,19 +563,27 @@ public class IdeUiSmoke implements ApplicationStarter {
       String page=request.url().queryParameter("page"); int number=page==null?0:Integer.parseInt(page);
       requests.add(path+":"+(query==null?"":query)+":"+number);
       String body="{}"; int code=200;
+      listRequests.add(request.url());
       if(path.equals("/tags/filter/search.json")) {
         tagRequests.add(request.url());
         String limit=request.url().queryParameter("limit");
         if(limit!=null && (!limit.matches("[0-9]+") || Integer.parseInt(limit)>5)) {code=400;body="{\"errors\":[\"Limit 无效\"]}";}
         else body="{\"results\":[{\"id\":1451,\"text\":\"软件开发\",\"name\":\"软件开发\",\"count\":123}]}";
       }
+      else if(path.equals("/tags.json")) {
+        if(failBrowseTags) throw new IOException("isolated browse tag failure");
+        body="{\"tags\":[{\"id\":1451,\"text\":\"软件开发\",\"count\":123},{\"id\":129,\"text\":\"纯水\",\"count\":456},{\"id\":777,\"text\":\"长标签名称用于确认省略与提示完整保留\",\"count\":10}],\"extras\":{\"tag_groups\":[{\"id\":1,\"name\":\"技术标签\",\"tags\":[{\"id\":1451,\"text\":\"软件开发\",\"count\":123}]}]}}";
+      }
+      else if(path.equals("/latest")) body="<script type='application/json' id='data-preloaded'>{\"siteSettings\":{\"tagging_enabled\":true,\"solved_enabled\":true,\"topic_voting_enabled\":true,\"enable_category_experts\":true,\"show_category_expert_advanced_search_filters\":true}}</script>";
+      else if(path.equals("/u/search/users.json")) body="{\"users\":[{\"username\":\"neo\"},{\"username\":\"new_user\"}]}";
       else if(path.equals("/categories.json")) body="{\"category_list\":{\"categories\":[{\"id\":4,\"name\":\"开发调优\",\"slug\":\"dev\",\"permission\":1}]}}";
       else if(path.equals("/session/current.json")) body="{\"current_user\":{\"id\":999997,\"username\":\"fixture_login\"}}";
-      else if(path.equals("/latest.json") || path.equals("/top.json")) {
+      else if(path.equals("/latest.json") || path.equals("/top.json") || path.startsWith("/c/") || path.startsWith("/tags/c/") || path.startsWith("/tag/")) {
         if(failList) code=500;
         else {
           JsonArray topics=new JsonArray();
-          if(path.equals("/top.json")) topics.add(listTopic(200,"切换条件后的话题"));
+          if(path.startsWith("/tags/c/") || path.startsWith("/tag/")) topics.add(listTopic(210+number,"标签筛选后的话题"));
+          else if(path.equals("/top.json") || path.startsWith("/c/")) topics.add(listTopic(200,"切换条件后的话题"));
           else {
             if(refresh && number==0) topics.add(listTopic(10001,"刷新新增的话题"));
             for(int i=number==0?1:40;i<=(number==0?40:60);i++) topics.add(listTopic(i,(refresh?"更新标题 ":"中文话题 ")+i));
@@ -644,7 +664,8 @@ public class IdeUiSmoke implements ApplicationStarter {
         Component rendered=list.getCellRenderer().getListCellRendererComponent(list,model.get(0),0,false,false);
         String meta=components((Container)rendered).stream().filter(c -> c instanceof JLabel).map(c -> ((JLabel)c).getText())
           .filter(t -> t!=null && t.contains("replies")).findFirst().orElseThrow();
-        return meta.contains("#软件开发") && meta.contains("#中文") && meta.contains("新话题") && meta.contains("小时前") && !meta.startsWith("General");
+        String all=components((Container)rendered).stream().filter(c -> c instanceof JLabel).map(c -> ((JLabel)c).getText()).filter(Objects::nonNull).reduce("",(a,b)->a+" "+b);
+        return all.contains("#软件开发") && all.contains("#中文") && meta.contains("新话题") && meta.contains("小时前") && !meta.startsWith("General");
       }));
       check("IDE_LIST_TOOLTIP_RETAINS_TITLE_AND_ABSOLUTE_TIME",edt(() -> {
         Rectangle row=list.getCellBounds(0,0);
@@ -684,6 +705,7 @@ public class IdeUiSmoke implements ApplicationStarter {
       });
       await("IDE search result opens",() -> opened.get()!=null);
       check("IDE_SEARCH_CLICK_CARRIES_MATCHED_FLOOR",opened.get().getId()==11 && opened.get().getSearchPostNumber()==42);
+      advancedAndTagChecks(panel,fixture,frame);
       fixture.hold("旧查询");edt(() -> {panel.search("旧查询");return null;});if(!fixture.entered.await(15,TimeUnit.SECONDS)) throw new AssertionError("Old query did not start");
       edt(() -> {panel.search("新查询");return null;});await("IDE new query supersedes old",() -> model.size()==1 && model.get(0).getId()==75);
       fixture.release.countDown();fixture.finished.await(15,TimeUnit.SECONDS);Thread.sleep(200);
@@ -722,6 +744,7 @@ public class IdeUiSmoke implements ApplicationStarter {
     volatile boolean uncertain, queued, tagFailure;
     volatile IOException tagError;
     volatile int extraTags;
+    volatile RequiredTagGroup requiredGroup;
     volatile int sends;
     public boolean getLoggedIn() { return true; }
     public void authListener(Disposable owner, Function0<Unit> changed) { listeners.add(changed); Disposer.register(owner, () -> listeners.remove(changed)); }
@@ -735,6 +758,7 @@ public class IdeUiSmoke implements ApplicationStarter {
       JsonObject result = new JsonObject(); JsonArray items = new JsonArray(); JsonObject tag = new JsonObject();
       if(query.isEmpty()) {
         JsonObject defaults=JsonParser.parseString("{\"results\":[{\"id\":\"1451\",\"text\":\"软件开发\",\"count\":123},{\"id\":\"129\",\"text\":\"纯水\",\"count\":456},{\"id\":\"130\",\"text\":\"禁用标签\",\"disabled\":true,\"title\":\"不能用于此类别\"}]}").getAsJsonObject();
+        if(requiredGroup!=null) defaults.add("required_tag_group",GSON.toJsonTree(requiredGroup));
         for(int i=0;i<extraTags;i++) {JsonObject item=new JsonObject();item.addProperty("id",10000+i);item.addProperty("text","推荐标签"+i);item.addProperty("count",i+100);defaults.getAsJsonArray("results").add(item);}
         return GSON.fromJson(defaults,TagSearchResultResponse.class);
       }
@@ -752,6 +776,95 @@ public class IdeUiSmoke implements ApplicationStarter {
   }
   private static DialogWrapper openTopic(Store store, TopicEnvironment environment, String key) throws Exception {
     return openTopic(store,environment,key,false);
+  }
+  @SuppressWarnings({"unchecked","rawtypes"}) private static void advancedAndTagChecks(IssueListPanel panel,ListFixture fixture,JFrame frame) throws Exception {
+    Object selector=field(panel,"tagSelector");
+    JComponent tagField=(JComponent)field(selector,"field");
+    JComboBox<?> picker=(JComboBox<?>)field(tagField,"picker");
+    JComboBox<?> categories=(JComboBox<?>)field(panel,"categoryComboBox");
+    DefaultListModel<Topic> topics=(DefaultListModel<Topic>)field(panel,"topicListModel");
+    fixture.failBrowseTags=true;
+    edt(()->{categories.setSelectedIndex(1);((JComboBox<?>)field(panel,"filterComboBox")).setSelectedItem(Constants.TopicFilter.HOT);picker.showPopup();return null;});
+    await("browse tag read failure",()->((JButton)field(selector,"retry")).isVisible());
+    check("IDE_BROWSE_TAG_FAILURE_OFFERS_RETRY",((DefaultListModel<?>)field(selector,"model")).isEmpty());
+    fixture.failBrowseTags=false;edt(()->{((JButton)field(selector,"retry")).doClick();return null;});
+    await("browse tag candidates",()->((DefaultListModel<?>)field(selector,"model")).size()==3);
+    showcaseCapture(frame,"topic-list-tag-picker");
+    edt(()->{
+      ((JTextField)field(selector,"input")).setText("技术");
+      JList<?> list=(JList<?>)field(selector,"list");list.setSelectedIndex(0);
+      for(java.awt.event.KeyListener listener:((JTextField)field(selector,"input")).getKeyListeners()) listener.keyPressed(new java.awt.event.KeyEvent((JTextField)field(selector,"input"),java.awt.event.KeyEvent.KEY_PRESSED,System.currentTimeMillis(),0,java.awt.event.KeyEvent.VK_ENTER,'\n'));
+      return null;
+    });
+    await("category filter and tag combined",()->topics.size()==1&&topics.get(0).getId()==210&&!(Boolean)field(panel,"isLoading"));
+    check("IDE_TAG_KEYBOARD_GROUP_SEARCH_SINGLE_SELECTION",((Set<?>)field(selector,"selected")).equals(Set.of("软件开发")));
+    check("IDE_CATEGORY_TAG_HOT_SERVER_QUERY",fixture.listRequests.stream().anyMatch(u->u.pathSegments().equals(List.of("tags","c","dev","4","软件开发","l","top.json"))&&"daily".equals(u.queryParameter("period"))));
+    edt(()->{((JButton)field(panel,"loadMoreButton")).doClick();return null;});
+    await("tag pagination",()->topics.size()==2&&topics.get(1).getId()==211);
+    edt(()->{panel.refreshList();return null;});await("tag refresh",()->!(Boolean)field(panel,"isLoading"));
+    check("IDE_TAG_REFRESH_RETAINS_PAGES_AND_CONDITIONS",topics.size()==2&&((Integer)field(panel,"currentPage"))==1);
+    showcaseCapture(frame,"topic-list-tag-filter-dark");
+    edt(()->{frame.setSize(360,640);return null;});Thread.sleep(250);
+    check("IDE_TAG_NEXT_TO_CATEGORY_AT_NARROW_WIDTH",edt(()->tagField.getLocationOnScreen().y==categories.getLocationOnScreen().y&&tagField.getLocationOnScreen().x>categories.getLocationOnScreen().x+categories.getWidth()));
+    showcaseCapture(frame,"topic-list-tag-filter-narrow");
+    edt(()->{frame.setSize(700,540);panel.search("中文");return null;});await("inherited keyword search",()->!(Boolean)field(panel,"isLoading"));
+    check("IDE_SEARCH_INHERITS_TAG_CATEGORY",fixture.requests.contains("/search.json:中文 category:4 tag:软件开发:1"));
+    edt(()->{panel.search("中文 category:8 tags:纯水");return null;});await("explicit overrides",()->!(Boolean)field(panel,"isLoading"));
+    check("IDE_SEARCH_EXPLICIT_OVERRIDES_NO_DUPLICATES",fixture.requests.contains("/search.json:中文 category:8 tags:纯水:1"));
+    edt(()->{panel.search("");return null;});await("search cleared returns filtered list",()->topics.size()==1&&topics.get(0).getId()==210);
+    check("IDE_CLEAR_SEARCH_RETURNS_TAG_FILTER",((Set<?>)field(selector,"selected")).equals(Set.of("软件开发")));
+    edt(()->{
+      JList<Topic> list=(JList<Topic>)field(panel,"topicList");
+      Rectangle row=list.getCellBounds(0,0);
+      Component renderer=list.getCellRenderer().getListCellRendererComponent(list,topics.get(0),0,false,false);
+      renderer.setSize(row.getSize());((Container)renderer).doLayout();
+      for(Component c:components((Container)renderer)) if(c instanceof Container) ((Container)c).doLayout();
+      Component tag=components((Container)renderer).stream().filter(c->c instanceof JLabel&&"#中文".equals(((JLabel)c).getText())).findFirst().orElseThrow();
+      Point p=SwingUtilities.convertPoint(tag,tag.getWidth()/2,tag.getHeight()/2,renderer);
+      report.println("TAG_CLICK_POINT="+p+";row="+row+";tag="+tag.getBounds()+";hit="+((com.lgguan.linuxdo.plugin.ui.toolwindow.TopicCardCellRenderer)field(panel,"topicRenderer")).tagAt(list,topics.get(0),0,p,row.getSize()));
+      list.dispatchEvent(new java.awt.event.MouseEvent(list,java.awt.event.MouseEvent.MOUSE_CLICKED,System.currentTimeMillis(),0,row.x+p.x,row.y+p.y,1,false,java.awt.event.MouseEvent.BUTTON1));
+      return null;
+    });
+    await("click list tag filters",()->((Set<?>)field(selector,"selected")).equals(Set.of("中文"))&&!(Boolean)field(panel,"isLoading"));
+    check("IDE_LIST_TAG_CLICK_FILTERS_ON_SERVER",fixture.listRequests.stream().anyMatch(u->u.pathSegments().contains("中文")&&u.encodedPath().endsWith("/l/top.json")));
+    AdvancedSearchDialog advanced=edt(()->new AdvancedSearchDialog(project,"\"引用短语\" -tag:排除 category:4 tags:软件开发+纯水 in:title order:latest_topic min_posts:3",List.of(),4,"忽略的继承标签",q->Unit.INSTANCE));
+    edt(()->{advanced.setModal(false);advanced.show();advanced.getWindow().setSize(680,780);advanced.getWindow().setLocation(80,50);return null;});
+    await("advanced features",()->((JLabel)field(advanced,"featureStatus")).getText().isEmpty());
+    check("IDE_ADVANCED_QUERY_RESTORES_AND_REPLACES",edt(()->{
+      ((JTextField)field(advanced,"authorField")).setText("neo");
+      String query=((JTextArea)field(advanced,"preview")).getText();
+      return query.contains("\"引用短语\" -tag:排除")&&query.contains("tags:软件开发+纯水")&&query.contains("order:latest_topic")&&query.contains("@neo")&&!query.contains("忽略的继承标签");
+    }));
+    await("username suggestions",()->((JComboBox<?>)field(advanced,"authorMatches")).getItemCount()==2);
+    check("IDE_ADVANCED_GUEST_HIDES_PERSONAL_SCOPES",!((JComboBox<?>)field(advanced,"scopeCombo")).isVisible());
+    showcaseCapture(advanced.getWindow(),"advanced-search-dark");
+    edt(()->{((Map<String,JTextField>)field(advanced,"dateFields")).get("after").setText("2026-02-31");return null;});
+    Object invalid=edt(()->invoke(advanced,"doValidate",new Class<?>[0]));
+    check("IDE_ADVANCED_INVALID_DATE_FOCUSES_FIELD",invalid instanceof com.intellij.openapi.ui.ValidationInfo&&((com.intellij.openapi.ui.ValidationInfo)invalid).component==((Map<?,?>)field(advanced,"dateFields")).get("after"));
+    edt(()->{((Map<String,JTextField>)field(advanced,"dateFields")).get("after").setText("2026-01-01");((JCheckBox)field(advanced,"allTags")).doClick();return null;});
+    check("IDE_ADVANCED_TAG_OR_QUERY",((JTextArea)field(advanced,"preview")).getText().contains("tags:软件开发,纯水"));
+    Object oldLaf=edt(()->com.intellij.ide.ui.LafManager.getInstance().getCurrentUIThemeLookAndFeel());
+    try {
+      edt(()->{com.intellij.ide.ui.LafManager manager=com.intellij.ide.ui.LafManager.getInstance();manager.setCurrentUIThemeLookAndFeel(manager.getDefaultLightLaf());manager.updateUI();return null;});
+      showcaseCapture(advanced.getWindow(),"advanced-search-light");
+      edt(()->{advanced.getWindow().setVisible(false);return null;});showcaseCapture(frame,"topic-list-tag-filter-light");
+      edt(()->{advanced.getWindow().setVisible(true);return null;});
+    } finally {edt(()->{com.intellij.ide.ui.LafManager manager=com.intellij.ide.ui.LafManager.getInstance();manager.setCurrentUIThemeLookAndFeel((com.intellij.ide.ui.laf.UIThemeLookAndFeelInfo)oldLaf);manager.updateUI();return null;});}
+    edt(()->{advanced.getWindow().setSize(440,600);return null;});Thread.sleep(250);showcaseCapture(advanced.getWindow(),"advanced-search-narrow");
+    check("IDE_ADVANCED_SCROLLABLE_NARROW_FORM",edt(()->components(advanced.getWindow()).stream().filter(c->c instanceof JScrollPane).anyMatch(c->((JScrollPane)c).getVerticalScrollBar().isVisible())));
+    edt(()->{advanced.close(DialogWrapper.CANCEL_EXIT_CODE);return null;});
+    // Change credentials inside the isolated fixture, then verify login-only controls.
+    LinuxDoAuthService auth=LinuxDoAuthService.Companion.getInstance();
+    com.lgguan.linuxdo.plugin.net.PersistentCookieJar jar=(com.lgguan.linuxdo.plugin.net.PersistentCookieJar)field(auth,"credentials");
+    edt(()->{jar.injectCookie("_t","isolated-advanced-user","linux.do");auth.credentialsPending();return null;});
+    java.util.concurrent.atomic.AtomicBoolean loggedIn=new java.util.concurrent.atomic.AtomicBoolean();
+    auth.refreshCurrentUser(true,ok->{loggedIn.set(ok);return Unit.INSTANCE;});await("advanced login fixture",loggedIn::get);
+    AdvancedSearchDialog personal=edt(()->new AdvancedSearchDialog(project,"in:messages order:read",q->Unit.INSTANCE));
+    edt(()->{personal.setModal(false);personal.show();return null;});await("personal features",()->((JLabel)field(personal,"featureStatus")).getText().isEmpty());
+    check("IDE_ADVANCED_LOGIN_PM_AND_RECENT_READ",edt(()->((JComboBox<?>)field(personal,"scopeCombo")).isVisible()&&((JTextArea)field(personal,"preview")).getText().contains("in:messages order:read")));
+    screenshot(personal,"advanced-search-personal-messages");
+    edt(()->{personal.close(DialogWrapper.CANCEL_EXIT_CODE);jar.clearAll();auth.credentialsPending();((JComboBox<?>)field(panel,"categoryComboBox")).setSelectedIndex(0);invoke(selector,"setSelection",new Class<?>[]{Collection.class,boolean.class},List.of(),true);((JComboBox<?>)field(panel,"filterComboBox")).setSelectedItem(Constants.TopicFilter.TOP);return null;});
+    await("restore browse fixture",()->!(Boolean)field(panel,"isLoading"));
   }
   private static DialogWrapper openTopic(Store store, TopicEnvironment environment, String key, boolean directEntry) throws Exception {
     ForumDraftSession session = new ForumDraftSession(key, SessionEpoch.INSTANCE.getCurrent(), store.transport,
@@ -857,8 +970,13 @@ public class IdeUiSmoke implements ApplicationStarter {
     check("CATEGORY_SEARCH_SLUG_SELECTS_ID",edt(() -> categories.getSelectedItem().toString().equals("测试版块") && !categories.isPopupVisible()));
     edt(() -> {categories.showPopup();search.setText("无匹配");return null;});
     check("CATEGORY_EMPTY_SEARCH_STAYS_OPEN",edt(() -> results.isEmpty() && categories.isPopupVisible() && ((JLabel)field(categories,"emptyLabel")).isVisible()));
-    edt(() -> {categories.hidePopup();categories.setSelectedIndex(1);button(dialog.getWindow(),"composer-tag-picker").doClick();return null;});
+    edt(() -> {categories.hidePopup();categories.setSelectedIndex(1);dialog.getWindow().toFront();return null;});
+    check("CATEGORY_TAG_SELECTORS_HAVE_EQUAL_HEIGHT",edt(() -> categories.getHeight()==tagPicker(dialog.getWindow()).getHeight()));
+    check("NO_REMOVE_BUTTONS_OUTSIDE_TAG_POPUP",components(dialog.getWindow()).stream().noneMatch(c->c.getName()!=null&&c.getName().startsWith("composer-remove-tag-")));
+    Point tagClick=edt(()->{JComboBox<?> c=tagPicker(dialog.getWindow());Point p=c.getLocationOnScreen();p.translate(30,c.getHeight()/2);return p;});
+    Robot tagRobot=new Robot();tagRobot.mouseMove(tagClick.x,tagClick.y);tagRobot.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);tagRobot.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
     await("tag choices",() -> ((DefaultListModel<?>)field(dialog,"tagSuggestionsModel")).size()==2);
+    check("TAG_CONTROL_LEFT_SIDE_OPENS_POPUP",true);
     clickTag(dialog,"纯水");
     check("TAG_MULTISELECT_KEEPS_POPUP_OPEN",edt(() -> ((com.intellij.openapi.ui.popup.JBPopup)field(dialog,"tagPopup")).isVisible() && ((Set<?>)field(dialog,"selectedTags")).containsAll(Arrays.asList("软件开发","纯水"))));
     clickTag(dialog,"禁用标签");
@@ -870,9 +988,9 @@ public class IdeUiSmoke implements ApplicationStarter {
     clickTag(dialog,"软件开发");
     choose("composer-remove-tag-纯水");
     await("tag choices restored",() -> ((DefaultListModel<?>)field(dialog,"tagSuggestionsModel")).size()==2);
-    check("TAG_WEB_LAYOUT_SELECTED_CHIPS_ABOVE_SEARCH",edt(() -> {
+    check("TAG_SELECTED_CHIPS_ONLY_INSIDE_POPUP",edt(() -> {
       JPanel chips=(JPanel)field(dialog,"tagsPanel");JTextField input=(JTextField)field(dialog,"tagInputField");JList<?> list=(JList<?>)field(dialog,"tagSuggestionsList");
-      return chips.isShowing() && list.getLocationOnScreen().y<chips.getLocationOnScreen().y && chips.getLocationOnScreen().y<input.getLocationOnScreen().y && ((JButton)field(dialog,"tagSelectButton")).getText().contains("软件开发");
+      return chips.isShowing() && SwingUtilities.isDescendingFrom(chips,((com.intellij.openapi.ui.popup.JBPopup)field(dialog,"tagPopup")).getContent()) && chips.getLocationOnScreen().y<input.getLocationOnScreen().y && ((JComboBox<?>)field(dialog,"tagSelectButton")).getToolTipText().contains("软件开发");
     }));
     JTextField tags=(JTextField)field(dialog,"tagInputField");
     edt(() -> {tags.setText("无匹配");return null;});
@@ -895,11 +1013,62 @@ public class IdeUiSmoke implements ApplicationStarter {
     edt(() -> {((com.intellij.openapi.ui.popup.JBPopup)field(dialog,"tagPopup")).cancel();return null;});
     await("tag validation ready",() -> okEnabled(dialog));
     tagReopenChecks(dialog,environment);
+    tagHintChecks(dialog,environment);
+  }
+  private static void tagHintChecks(DialogWrapper dialog,TopicEnvironment environment) throws Exception {
+    environment.requiredGroup=new RequiredTagGroup("原创",1);
+    edt(()->{invoke(dialog,"validateSelectedTags",new Class<?>[0]);return null;});
+    await("required tag hint",()->((JLabel)field(dialog,"tagStatus")).getText().contains("原创")&&!(Boolean)field(dialog,"validatingTags"));
+    check("TAG_REQUIRED_GROUP_BLOCKS_PUBLISH",!okEnabled(dialog));
+    check("TAG_REQUIRED_HINT_UNDER_TAG_COLUMN",edt(()->{
+      JComponent tags=(JComponent)field(dialog,"tagField");JLabel hint=(JLabel)field(dialog,"tagStatus");
+      return hint.isShowing()&&hint.getLocationOnScreen().x==tags.getLocationOnScreen().x&&hint.getLocationOnScreen().y>=tags.getLocationOnScreen().y+tags.getHeight();
+    }));
+    showcaseCapture(dialog.getWindow(),"create-topic-hint-required");
+    environment.tagFailure=true;
+    edt(()->{invoke(dialog,"validateSelectedTags",new Class<?>[0]);return null;});
+    await("failed tag hint",()->(Boolean)field(dialog,"tagCheckFailed"));
+    check("TAG_CHECK_FAILURE_BLOCKS_PUBLISH_AND_SHOWS_RETRY",!okEnabled(dialog)&&((JButton)field(dialog,"tagRetry")).isShowing());
+    showcaseCapture(dialog.getWindow(),"create-topic-hint-error");
+    environment.tagFailure=false;environment.requiredGroup=null;
+    edt(()->{((JButton)field(dialog,"tagRetry")).doClick();return null;});
+    await("tag hint retry",()->okEnabled(dialog)&&!((JPanel)field(dialog,"tagHintPanel")).isVisible());
+    check("TAG_SUCCESS_HIDES_HINT",true);
+    showcaseCapture(dialog.getWindow(),"create-topic-tags-dark");
+    edt(()->{invoke(dialog,"addTag",new Class<?>[]{String.class},"用于确认长标签名称省略以及完整提示保留的标签");return null;});
+    await("long tag validated",()->okEnabled(dialog));
+    check("TAG_LONG_NAME_ELIDES_WITH_FULL_TOOLTIP",edt(()->components((Container)field(dialog,"tagsPanel")).stream().anyMatch(c->c instanceof JLabel&&((JLabel)c).getText().endsWith("…")&&((JLabel)c).getToolTipText().equals("用于确认长标签名称省略以及完整提示保留的标签"))));
+    edt(()->{invoke(dialog,"removeTag",new Class<?>[]{String.class},"用于确认长标签名称省略以及完整提示保留的标签");return null;});
+    await("long tag removed",()->okEnabled(dialog));
+    String preservedBody=text(dialog).getText();
+    Object previous=edt(()->com.intellij.ide.ui.LafManager.getInstance().getCurrentUIThemeLookAndFeel());
+    try {
+      edt(()->{com.intellij.ide.ui.LafManager manager=com.intellij.ide.ui.LafManager.getInstance();manager.setCurrentUIThemeLookAndFeel(manager.getDefaultLightLaf());manager.updateUI();return null;});
+      await("composer follows light theme",()->text(dialog).getBackground().equals(com.intellij.openapi.editor.colors.EditorColorsManager.getInstance().getGlobalScheme().getDefaultBackground()));
+      await("composer follows light native controls",()->edt(()->tagPicker(dialog.getWindow()).getForeground().equals(UIManager.getColor("ComboBox.foreground"))&&((JTextField)field(dialog,"titleField")).getForeground().equals(UIManager.getColor("TextField.foreground"))));
+      check("COMPOSER_THEME_UPDATES_ALL_NATIVE_PANELS",edt(()->{JTextArea editor=text(dialog);return components(dialog.getWindow()).stream().filter(c->c instanceof JPanel&&((JPanel)c).isOpaque()&&c!=editor.getParent()).allMatch(c->c.getBackground().equals(com.intellij.util.ui.UIUtil.getPanelBackground())||c.getBackground().equals(editor.getBackground()));}));
+      check("COMPOSER_THEME_UPDATES_EDITOR_SURROUND_AND_CARET",edt(()->text(dialog).getParent().getBackground().equals(text(dialog).getBackground())&&text(dialog).getCaretColor().equals(text(dialog).getForeground())&&((Set<?>)field(dialog,"selectedTags")).equals(Set.of("软件开发"))));
+      showcaseCapture(dialog.getWindow(),"create-topic-tags-light");
+      edt(()->{button(dialog.getWindow(),"composer-preview").doClick();text(dialog).select(0,4);return null;});
+      ComposerPreviewView themedPreview=(ComposerPreviewView)invoke(dialog,"getPreviewView",new Class<?>[0]);
+      await("light composer preview ready",()->(Boolean)field(themedPreview,"ready"));
+      showcaseCapture(dialog.getWindow(),"create-topic-preview-light");
+      float scale=com.intellij.ui.scale.JBUIScale.scale(1f);
+      try {
+        edt(()->{com.intellij.ui.scale.JBUIScale.setUserScaleFactor(1.25f);SwingUtilities.updateComponentTreeUI(dialog.getWindow());dialog.getWindow().validate();return null;});
+        check("TAG_DYNAMIC_SCALE_RETAINS_CHIPS",((Set<?>)field(dialog,"selectedTags")).equals(Set.of("软件开发"))&&((JPanel)field(dialog,"tagsPanel")).getComponentCount()==1);
+        showcaseCapture(dialog.getWindow(),"create-topic-tags-scaled");
+      } finally {edt(()->{com.intellij.ui.scale.JBUIScale.setUserScaleFactor(scale);text(dialog).select(0,4);return null;});}
+    } finally {edt(()->{com.intellij.ide.ui.LafManager manager=com.intellij.ide.ui.LafManager.getInstance();manager.setCurrentUIThemeLookAndFeel((com.intellij.ide.ui.laf.UIThemeLookAndFeelInfo)previous);manager.updateUI();return null;});}
+    await("composer restores dark editor",()->text(dialog).getBackground().equals(com.intellij.openapi.editor.colors.EditorColorsManager.getInstance().getGlobalScheme().getDefaultBackground()));
+    check("COMPOSER_THEME_PRESERVES_BODY_SELECTION_AND_TAGS",edt(()->text(dialog).getText().equals(preservedBody)&&text(dialog).getSelectionStart()==0&&text(dialog).getSelectionEnd()==4&&((Set<?>)field(dialog,"selectedTags")).equals(Set.of("软件开发"))));
+    showcaseCapture(dialog.getWindow(),"create-topic-preview-dark");
+    edt(()->{button(dialog.getWindow(),"composer-preview").doClick();text(dialog).setCaretPosition(text(dialog).getText().length());return null;});
   }
   @SuppressWarnings({"rawtypes","unchecked"}) private static void tagReopenChecks(DialogWrapper dialog,TopicEnvironment environment) throws Exception {
     environment.extraTags=200;
     for(int cycle=0;cycle<15;cycle++) {
-      edt(() -> {button(dialog.getWindow(),"composer-tag-picker").doClick();return null;});
+      edt(() -> {tagPicker(dialog.getWindow()).showPopup();return null;});
       await("large tag popup reopen",() -> ((DefaultListModel<?>)field(dialog,"tagSuggestionsModel")).size()==202);
       if(cycle==0) check("TAG_RENDERER_REUSES_ONE_ROW",edt(() -> {
         JList list=(JList)field(dialog,"tagSuggestionsList");ListCellRenderer renderer=list.getCellRenderer();
@@ -914,8 +1083,8 @@ public class IdeUiSmoke implements ApplicationStarter {
     }));
     Dimension original=edt(() -> dialog.getWindow().getSize());
     edt(() -> {dialog.getWindow().setSize(440,700);return null;});
-    await("narrow composer layout",() -> ((JButton)field(dialog,"tagSelectButton")).getWidth()<com.intellij.util.ui.JBUI.scale(300));
-    edt(() -> {button(dialog.getWindow(),"composer-tag-picker").doClick();return null;});
+    await("narrow composer layout",() -> edt(()->tagPicker(dialog.getWindow()).getLocationOnScreen().y>((JComboBox<?>)field(dialog,"categoryComboBox")).getLocationOnScreen().y));
+    edt(() -> {tagPicker(dialog.getWindow()).showPopup();return null;});
     await("narrow tag popup",() -> ((DefaultListModel<?>)field(dialog,"tagSuggestionsModel")).size()==202);
     for(int i=0;i<7;i++) clickTag(dialog,"推荐标签"+i);
     await("selected chips wrap",() -> edt(() -> {
@@ -926,14 +1095,13 @@ public class IdeUiSmoke implements ApplicationStarter {
       JPanel chips=(JPanel)field(dialog,"tagsPanel");JComponent content=((com.intellij.openapi.ui.popup.JBPopup)field(dialog,"tagPopup")).getContent();
       return "TAG_NARROW_BOUNDS=content:"+content.getSize()+";chips:"+chips.getSize()+";rows:"+Arrays.stream(chips.getComponents()).map(c -> c.getBounds().toString()).toList();
     }));
-    check("TAG_EIGHT_CHIPS_WRAP_IN_NARROW_POPUP",edt(() -> {
+    check("TAG_EIGHT_CHIPS_WRAP_INSIDE_NARROW_POPUP",edt(() -> {
       JPanel chips=(JPanel)field(dialog,"tagsPanel");
       JComponent content=((com.intellij.openapi.ui.popup.JBPopup)field(dialog,"tagPopup")).getContent();
-      return content.getWidth()<=com.intellij.util.ui.JBUI.scale(406) && Arrays.stream(chips.getComponents()).allMatch(c -> c.getX()+c.getWidth()<=chips.getWidth() && c.getY()+c.getHeight()<=chips.getHeight());
+      return content.getWidth()<=dialog.getWindow().getWidth() && Arrays.stream(chips.getComponents()).allMatch(c -> c.getX()+c.getWidth()<=chips.getWidth() && c.getY()+c.getHeight()<=chips.getHeight());
     }));
     check("TAG_REMOVE_BUTTON_COMPACT",edt(() -> {
-      JComponent content=((com.intellij.openapi.ui.popup.JBPopup)field(dialog,"tagPopup")).getContent();
-      return components(content).stream().filter(c -> "composer-remove-tag-软件开发".equals(c.getName())).findFirst().orElseThrow().getWidth()<=com.intellij.util.ui.JBUI.scale(20);
+      return components(((com.intellij.openapi.ui.popup.JBPopup)field(dialog,"tagPopup")).getContent()).stream().filter(c -> "composer-remove-tag-软件开发".equals(c.getName())).findFirst().orElseThrow().getWidth()<=com.intellij.util.ui.JBUI.scale(20);
     }));
     for(int i=0;i<7;i++) choose("composer-remove-tag-推荐标签"+i);
     await("narrow tag cleanup",() -> ((DefaultListModel<?>)field(dialog,"tagSuggestionsModel")).size()==202 && okEnabled(dialog));
@@ -949,12 +1117,14 @@ public class IdeUiSmoke implements ApplicationStarter {
     check("TOPIC_RESTORES_FULL_DRAFT", edt(() -> ((JTextField)field(dialog,"titleField")).getText().equals("网页原始标题") && text(dialog).getText().equals(BODY)));
     JComboBox<?> categories = (JComboBox<?>)field(dialog,"categoryComboBox");
     check("TOPIC_EXCLUDES_UNWRITABLE_CATEGORY", edt(() -> categories.getItemCount()==3 && categories.getSelectedItem().toString().equals("开发调优")));
+    previewChecks(dialog);
+    edt(()->{button(dialog.getWindow(),"composer-preview").doClick();return null;});
     topicPickerChecks(dialog,environment,categories);
     edt(() -> { ((JTextField)field(dialog,"titleField")).setText("插件修改后的标题"); text(dialog).append("\n插件正文修改"); return null; });
     String local = text(dialog).getText();
     await("topic autosave", () -> store.body().equals(local) && status(dialog).getText().equals("已同步到论坛"));
     check("TOPIC_AUTOSAVE_PRESERVES_UNKNOWN_FIELDS", store.data.get("title").getAsString().equals("插件修改后的标题") && store.data.get("unknown").getAsString().equals("keep"));
-    previewChecks(dialog);
+    edt(()->{button(dialog.getWindow(),"composer-preview").doClick();return null;});
     Thread.sleep(450);
     screenshot(dialog,"topic-restored-preview");
     Window composer=edt(dialog::getWindow);
@@ -963,7 +1133,7 @@ public class IdeUiSmoke implements ApplicationStarter {
     ComposerEditorSupport support=(ComposerEditorSupport)edt(() -> invoke(dialog,"getEditorSupport",new Class<?>[0]));
     screenshot(dialog,"topic-narrow-preview");
     report.println("COMPOSER_NARROW_WIDTH="+composer.getWidth()+";TOOLBAR="+support.getToolbar().getSize());
-    check("IDE_NARROW_COMPOSER_TOOLBAR_WRAPS",edt(() -> composer.getWidth()<=450 && Arrays.stream(support.getToolbar().getComponents()).filter(Component::isVisible).allMatch(c -> c.getX()>=0 && c.getX()+c.getWidth()<=support.getToolbar().getWidth() && c.getY()+c.getHeight()<=support.getToolbar().getHeight())));
+    check("IDE_NARROW_COMPOSER_TOOLBAR_WRAPS",edt(() -> composer.getWidth()<com.intellij.util.ui.JBUI.scale(520) && Arrays.stream(support.getToolbar().getComponents()).filter(Component::isVisible).allMatch(c -> c.getX()>=0 && c.getX()+c.getWidth()<=support.getToolbar().getWidth() && c.getY()+c.getHeight()<=support.getToolbar().getHeight())));
     screenshot(dialog,"topic-narrow-preview");
     edt(() -> {composer.setSize(originalSize);return null;});
     check("IDE_COMPOSER_ICON_BUTTONS_ACCESSIBLE",edt(() -> Arrays.stream(support.getToolbar().getComponents()).filter(c -> c instanceof JButton).map(c -> (JButton)c).allMatch(b -> b.getIcon()!=null && (b.getText()==null || b.getText().isEmpty()) && b.getAccessibleContext().getAccessibleName()!=null)));
@@ -1040,6 +1210,19 @@ public class IdeUiSmoke implements ApplicationStarter {
     if (result.has("error")) throw new AssertionError(result.toString());
     return result;
   }
+  private static void awaitReaderBridge(LinuxDoBrowser browser, LinuxDoJSQuery query, BlockingQueue<String> replies) throws Exception {
+    // A newly opened editor can still have an EDT render queued after its topic arrives.
+    // Poll from the smoke worker so that native load and bridge callbacks can complete.
+    replies.clear();
+    long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
+    String script="(()=>{"+query.inject("'probe:'+JSON.stringify({ok:!!window.intellijBridge&&document.querySelectorAll('.post-entry').length===2})")+"})()";
+    while(System.nanoTime()<deadline){
+      browser.getCefBrowser().executeJavaScript(script,browser.getCefBrowser().getURL(),0);
+      String value=replies.poll(100,TimeUnit.MILLISECONDS);
+      if(value!=null&&JsonParser.parseString(value).getAsJsonObject().get("ok").getAsBoolean())return;
+    }
+    throw new AssertionError("Timed out: first topic bridge ready");
+  }
   private static void reader() throws Exception {
     JsonObject topic = new JsonObject(); topic.addProperty("id", 999999); topic.addProperty("title", "IDE 文档阅读验收");
     topic.addProperty("highest_post_number", 12); topic.addProperty("posts_count", 12);
@@ -1049,6 +1232,7 @@ public class IdeUiSmoke implements ApplicationStarter {
     for (int floor = 1; floor <= 12; floor++) {
       JsonObject post = new JsonObject(); post.addProperty("id", floor); post.addProperty("topic_id", 999999);
       post.addProperty("post_number", floor); post.addProperty("username", "fixture_author");
+      post.addProperty("can_boost",floor>1);post.add("boosts",new JsonArray());
       post.addProperty("yours",floor==1);post.addProperty("can_edit",floor==1);post.addProperty("can_delete",floor==1);
       post.addProperty("can_view_edit_history",true);post.addProperty("version",2);post.addProperty("bookmarked",false);
       if(floor<=2)post.add("reactions",new JsonArray());
@@ -1059,6 +1243,10 @@ public class IdeUiSmoke implements ApplicationStarter {
     }
     JsonObject stream = new JsonObject(); stream.add("posts", posts); stream.add("stream", ids); topic.add("post_stream", stream);
     TopicDetailResponse detail = GSON.fromJson(topic, TopicDetailResponse.class);
+    JsonObject firstOpenTopic=topic.deepCopy();firstOpenTopic.addProperty("id",999997);firstOpenTopic.addProperty("title","首次打开已读验收");firstOpenTopic.addProperty("highest_post_number",2);firstOpenTopic.addProperty("last_read_post_number",0);
+    JsonArray firstOpenPosts=new JsonArray();
+    for(int i=0;i<2;i++){JsonObject p=posts.get(i).getAsJsonObject().deepCopy();p.addProperty("id",910001+i);p.addProperty("topic_id",999997);p.addProperty("cooked","<p>首次打开时保持可见的正文 "+(i+1)+"</p>");firstOpenPosts.add(p);}
+    JsonObject firstOpenStream=new JsonObject();firstOpenStream.add("posts",firstOpenPosts);firstOpenStream.add("stream",JsonParser.parseString("[910001,910002]"));firstOpenTopic.add("post_stream",firstOpenStream);
     // Reader capabilities include account state. Use memory-only credentials and local timing responses.
     LinuxDoAuthService auth=LinuxDoAuthService.Companion.getInstance();
     Field credentialsField=LinuxDoAuthService.class.getDeclaredField("credentials");credentialsField.setAccessible(true);
@@ -1072,23 +1260,50 @@ public class IdeUiSmoke implements ApplicationStarter {
     LinuxDoSettingsState settings=LinuxDoSettingsState.Companion.getInstance();String previousMode=settings.getNetworkMode();
     boolean previousAutoReport=settings.getAutoReportReadTimings();settings.setAutoReportReadTimings(true);
     java.util.concurrent.atomic.AtomicInteger timingPosts=new java.util.concurrent.atomic.AtomicInteger();
+    java.util.concurrent.atomic.AtomicInteger timingFailuresRemaining=new java.util.concurrent.atomic.AtomicInteger(1);
+    java.util.concurrent.atomic.AtomicInteger timingSuccesses=new java.util.concurrent.atomic.AtomicInteger();
     java.util.concurrent.atomic.AtomicBoolean timingCsrfVerified=new java.util.concurrent.atomic.AtomicBoolean();
     java.util.concurrent.atomic.AtomicReference<Map<String,String>> timingBody=new java.util.concurrent.atomic.AtomicReference<>();
+    java.util.concurrent.atomic.AtomicInteger boostSends=new java.util.concurrent.atomic.AtomicInteger(),boostDeletes=new java.util.concurrent.atomic.AtomicInteger();
+    java.util.concurrent.atomic.AtomicBoolean rejectBoost=new java.util.concurrent.atomic.AtomicBoolean(false);
+    java.util.concurrent.atomic.AtomicReference<JsonObject> boostPayload=new java.util.concurrent.atomic.AtomicReference<>();
     settings.setNetworkMode("JAVA_ONLY");
     clientField.set(null,previousClient.newBuilder().cookieJar(readerCredentials).addInterceptor(chain->{
-      okhttp3.Request request=chain.request();String path=request.url().encodedPath();String response;
+      okhttp3.Request request=chain.request();String path=request.url().encodedPath();String response;int responseCode=200;
       if(request.method().equals("GET")&&(path.equals("/session/csrf")||path.equals("/session/csrf.json")))response="{\"csrf\":\"reader-fixture-csrf\"}";
+      else if(request.method().equals("GET")&&path.equals("/t/999997.json"))response=firstOpenTopic.toString();
+      else if(request.method().equals("GET")&&path.equals("/latest"))response="<script id='data-preloaded' type='application/json'>{\"siteSettings\":{\"emoji_deny_list\":\"\"},\"customEmoji\":[]}</script>";
+      else if(request.method().equals("GET")&&path.matches("/posts/\\d+\\.json")) {
+        int floor=Integer.parseInt(path.substring(7,path.length()-5));response=posts.get(floor-1).toString();
+      }
+      else if(request.method().equals("GET")&&path.equals("/t/999999/posts.json")) {
+        int floor=Integer.parseInt(request.url().queryParameter("post_ids[]"));
+        JsonObject wrapper=new JsonObject(),postStream=new JsonObject();JsonArray one=new JsonArray();one.add(posts.get(floor-1).deepCopy());postStream.add("posts",one);wrapper.add("post_stream",postStream);response=wrapper.toString();
+      }
+      else if(request.method().equals("POST")&&path.equals("/discourse-boosts/posts/2/boosts")) {
+        okio.Buffer body=new okio.Buffer();request.body().writeTo(body);JsonObject payload=JsonParser.parseString(body.readUtf8()).getAsJsonObject();boostPayload.set(payload);boostSends.incrementAndGet();
+        if(rejectBoost.get()){responseCode=422;response="{\"errors\":[\"模拟校验失败，输入已保留\"]}";}
+        else {JsonObject boost=new JsonObject();boost.addProperty("id",4001);boost.addProperty("cooked",new org.jsoup.nodes.Element("p").text(payload.get("raw").getAsString()).outerHtml());boost.addProperty("can_delete",true);boost.add("user",JsonParser.parseString("{\"id\":999998,\"username\":\"fixture_reader\"}"));JsonArray list=new JsonArray();list.add(boost);posts.get(1).getAsJsonObject().add("boosts",list);posts.get(1).getAsJsonObject().addProperty("can_boost",false);response=boost.toString();}
+      }
+      else if(request.method().equals("DELETE")&&path.equals("/discourse-boosts/boosts/4001")) {
+        boostDeletes.incrementAndGet();posts.get(1).getAsJsonObject().add("boosts",new JsonArray());posts.get(1).getAsJsonObject().addProperty("can_boost",true);responseCode=204;response="";
+      }
       else if(request.method().equals("POST")&&path.equals("/topics/timings")){
         okio.Buffer form=new okio.Buffer();request.body().writeTo(form);Map<String,String> values=new HashMap<>();
         for(String entry:form.readUtf8().split("&")){String[] pair=entry.split("=",2);values.put(java.net.URLDecoder.decode(pair[0],java.nio.charset.StandardCharsets.UTF_8),java.net.URLDecoder.decode(pair[1],java.nio.charset.StandardCharsets.UTF_8));}
-        timingBody.set(values);timingPosts.incrementAndGet();response="";
-        timingCsrfVerified.set("reader-fixture-csrf".equals(request.header("X-CSRF-Token")));
+        response="";
+        if(!"999997".equals(values.get("topic_id"))){
+          timingBody.set(values);timingPosts.incrementAndGet();
+          if(timingFailuresRemaining.getAndDecrement()>0){responseCode=503;response="{}";}else timingSuccesses.incrementAndGet();
+          timingCsrfVerified.set("reader-fixture-csrf".equals(request.header("X-CSRF-Token")));
+        }
       }
       else throw new IOException("Isolated reader rejects all HTTP transport");
-      return new okhttp3.Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1).code(200).message("isolated reader fixture").body(okhttp3.ResponseBody.create(response,okhttp3.MediaType.parse("application/json"))).build();
+      return new okhttp3.Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1).code(responseCode).message("isolated reader fixture").body(okhttp3.ResponseBody.create(response,okhttp3.MediaType.parse("application/json"))).build();
     }).build());
     credentialsField.set(auth,readerCredentials);
     auth.setCurrentUserDirectly(GSON.fromJson("{\"id\":999998,\"username\":\"fixture_reader\"}",UserInfo.class));
+    firstOpenReadAcceptance();
     DocViewerPanel panel = edt(() -> new DocViewerPanel(project));
     JFrame frame = edt(() -> { JFrame f = new JFrame("Linux Do reader acceptance"); f.setContentPane(panel); f.setSize(960, 700); f.setLocation(120, 100); f.setVisible(true); return f; });
     LinuxDoJSQuery query = null;
@@ -1140,6 +1355,7 @@ public class IdeUiSmoke implements ApplicationStarter {
       } finally {edt(()->{settings.setReadingWidth(originalWidth);settings.fireSettingsChanged();return null;});}
       await("reading width restored",()->evaluate(browser,themeQuery,replies,"({ok:linuxDoPage.width==="+originalWidth+"})").get("ok").getAsBoolean());
       evaluate(browser,query,replies,"(()=>{getSelection().removeAllRanges();document.querySelector('#floor-1 details').open=false;return {ok:true}})()");
+      boostReaderAcceptance(panel,browser,query,replies,frame,boostSends,boostDeletes,rejectBoost,boostPayload);
       check("IDE_CROSS_TOPIC_QUOTE_SHOWS_CONTEXT",evaluate(browser,query,replies,"(()=>{var original=window.intellijBridge.readerAction;var target=0;window.intellijBridge.readerAction=function(key,id,action,postId,input){target=input.topic;linuxDoReaderResult(key,id,{items:[{floor:5,author:'sample',text:'公开引用上下文'}]})};document.querySelector('aside[data-topic=\"2909396\"] .quote-controls').click();window.intellijBridge.readerAction=original;return {ok:target===2909396 && !!document.querySelector('.topic-reader-panel')}})()").get("ok").getAsBoolean());
       evaluate(browser, query, replies, "(()=>{document.querySelector('.topic-reader-panel button').click();linuxDoPagination.jump(8);return {ok:true}})()");
       await("IDE receives successful jump origin", () -> ((Map<?,?>)field(panel, "returnFloors")).containsKey(999999L));
@@ -1177,11 +1393,22 @@ public class IdeUiSmoke implements ApplicationStarter {
       await("automatic foreground read samples",()->evaluate(browser,readingQuery,replies,"({ok:[...document.querySelectorAll('.unread-dot')].every(el=>getComputedStyle(el).display==='none')})").get("ok").getAsBoolean());
       check("IDE_AUTO_READ_UPDATES_VISIBLE_DOTS",LinuxDoReadTrackingService.Companion.getInstance().isPostRead(999999L,1,false,0)&&LinuxDoReadTrackingService.Companion.getInstance().isPostRead(999999L,2,false,0));
       check("IDE_AUTO_READ_CLEARS_UNREAD_TOOL",evaluate(browser,query,replies,"({ok:linuxDoPage.unreadFloor===null&&[...document.querySelectorAll('.topic-reader-menu button')].find(el=>el.textContent==='未读').hidden})").get("ok").getAsBoolean());
+      await("failed timings show persisted pending queue",()->LinuxDoReadTrackingService.Companion.getInstance().syncStatus(999999L)!=null);
+      await("pending timings appear in reader toolbar",()->evaluate(browser,readingQuery,replies,"({ok:!document.querySelector('.read-sync-badge').hidden})").get("ok").getAsBoolean());
+      check("IDE_FAILED_TIMINGS_RETAINED_FOR_RETRY",LinuxDoReadTrackingService.Companion.getInstance().getState().getPendingReadBatches().size()>0);
+      showcaseCapture(frame,"read-sync-network-pending");
+      int sendsBeforePause=timingPosts.get();
+      edt(()->{settings.setAutoReportReadTimings(false);settings.fireSettingsChanged();return null;});Thread.sleep(6100);
+      check("IDE_DISABLED_READ_SYNC_PAUSES_UPLOAD",timingPosts.get()==sendsBeforePause&&LinuxDoReadTrackingService.Companion.getInstance().syncStatus(999999L).contains("自动同步已关闭"));
+      check("IDE_DISABLED_READ_SYNC_PAUSES_SAMPLING",(Boolean)invoke(invoke(field(panel,"readingClock"),"drain",new Class<?>[0]),"isEmpty",new Class<?>[0]));
+      edt(()->{settings.setAutoReportReadTimings(true);settings.fireSettingsChanged();return null;});
+      await("retained timing snapshot is retried after backoff",()->timingSuccesses.get()>0);
+      check("IDE_FAILED_TIMINGS_AUTOMATIC_RETRY",timingPosts.get()>=2);
       edt(()->{invoke(panel,"flushReading",new Class<?>[0]);return null;});await("automatic timings reach mock server",()->timingPosts.get()>0);
       Map<String,String> reportedValues=timingBody.get();
-      check("IDE_AUTO_READ_SYNCS_REAL_TIMING_PAYLOAD",timingCsrfVerified.get() && reportedValues.get("topic_id").equals("999999") && Long.parseLong(reportedValues.get("timings[1]"))>0 && Long.parseLong(reportedValues.get("timings[2]"))>0 && Long.parseLong(reportedValues.get("topic_time"))==Long.parseLong(reportedValues.get("timings[1]"))+Long.parseLong(reportedValues.get("timings[2]")));
+      check("IDE_AUTO_READ_SYNCS_REAL_TIMING_PAYLOAD",timingCsrfVerified.get() && reportedValues.get("topic_id").equals("999999") && Long.parseLong(reportedValues.get("timings[1]"))>0 && Long.parseLong(reportedValues.get("timings[2]"))>0 && Long.parseLong(reportedValues.get("topic_time"))>=Long.parseLong(reportedValues.get("timings[1]")) && Long.parseLong(reportedValues.get("topic_time"))<Long.parseLong(reportedValues.get("timings[1]"))+Long.parseLong(reportedValues.get("timings[2]")));
       edt(()->{panel.setSelected(false);return null;});Thread.sleep(1200);
-      check("IDE_BACKGROUND_TAB_ACCUMULATES_NO_READING",((Map<?,?>)invoke(field(panel,"readingClock"),"drain",new Class<?>[0])).isEmpty());
+      check("IDE_BACKGROUND_TAB_ACCUMULATES_NO_READING",(Boolean)invoke(invoke(field(panel,"readingClock"),"drain",new Class<?>[0]),"isEmpty",new Class<?>[0]));
       evaluate(browser,query,replies,"(()=>{linuxDoPagination.jump(2);return {ok:true}})()");
       check("IDE_LOCATION_STATUS_AND_SHORTCUTS_SHARE_ROW",evaluate(browser,query,replies,"(()=>{const a=document.querySelector('.topic-navigation-status').getBoundingClientRect(),b=document.querySelector('.floor-jump-controls').getBoundingClientRect();return {ok:Math.abs((a.top+a.bottom)/2-(b.top+b.bottom)/2)<2}})()").get("ok").getAsBoolean());
       evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 .post-actions-menu').open=true;return {ok:true}})()");
@@ -1239,6 +1466,123 @@ public class IdeUiSmoke implements ApplicationStarter {
     }
     report.println("READER_NETWORK_REQUESTS_BLOCKED=true");
     report.println("TOTAL_CHECKS=" + checks.size());
+  }
+  private static void boostReaderAcceptance(DocViewerPanel panel,LinuxDoBrowser browser,LinuxDoJSQuery query,BlockingQueue<String> replies,JFrame frame,
+      java.util.concurrent.atomic.AtomicInteger sends,java.util.concurrent.atomic.AtomicInteger deletes,java.util.concurrent.atomic.AtomicBoolean reject,
+      java.util.concurrent.atomic.AtomicReference<JsonObject> payload) throws Exception {
+    evaluate(browser,query,replies,"(()=>{window.boostPatchTrace=[];const patch=linuxDoPagination.patch;linuxDoPagination.patch=function(html){const body=document.querySelector('#floor-2 .post-content'),before={top:body.getBoundingClientRect().top,scroll:scrollY,floor:this.currentFloor()};patch.call(this,html);boostPatchTrace.push({before,after:{top:body.getBoundingClientRect().top,scroll:scrollY,floor:this.currentFloor()}});};return {ok:true}})()");
+    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 [data-boost-open]').scrollIntoView({block:'center'});return {ok:true}})()");Thread.sleep(400);
+    evaluate(browser,query,replies,"(()=>{window.boostBody=document.querySelector('#floor-2 .post-content');window.boostTop=boostBody.getBoundingClientRect().top;document.querySelector('#floor-2 [data-boost-open]').click();return {ok:true}})()");
+    await("native Boost permissions and catalog",()->evaluate(browser,query,replies,"(()=>{if(!document.querySelector('.boost-popover'))document.querySelector('#floor-2 [data-boost-open]').click();return {ok:!!document.querySelector('.boost-status')?.textContent.includes('Enter')}})()").get("ok").getAsBoolean());
+    check("IDE_BOOST_FLOAT_AT_FLOOR",evaluate(browser,query,replies,"(()=>{const r=document.querySelector('.boost-popover').getBoundingClientRect();return {ok:r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=document.querySelector('.topic-navigation').getBoundingClientRect().top}})()").get("ok").getAsBoolean());
+    check("IDE_BOOST_UNICODE_GRAPHEME_COUNTER",evaluate(browser,query,replies,"(()=>{const i=document.querySelector('.boost-input');i.value='👨‍👩‍👧‍👦👍🏻é:tada:';i.dispatchEvent(new Event('input'));const s=linuxDoBoostStats(i.value);return {ok:s.visible===4&&s.emoji===3}})()").get("ok").getAsBoolean());
+    int initial=sends.get();
+    evaluate(browser,query,replies,"(()=>{const i=document.querySelector('.boost-input');i.value='谢谢👍';i.dispatchEvent(new Event('input'));i.dispatchEvent(new CompositionEvent('compositionstart',{data:'谢'}));i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,isComposing:true}));return {ok:true}})()");Thread.sleep(250);
+    check("IDE_BOOST_COMPOSITION_ENTER_DOES_NOT_SEND",sends.get()==initial);
+    evaluate(browser,query,replies,"(()=>{const i=document.querySelector('.boost-input');i.dispatchEvent(new CompositionEvent('compositionend',{data:'谢谢'}));i.value='👍🏻'.repeat(6);i.dispatchEvent(new Event('input'));return {ok:document.querySelector('.boost-controls button').disabled}})()");
+    check("IDE_BOOST_FIVE_EMOJI_LIMIT",evaluate(browser,query,replies,"({ok:document.querySelector('.boost-controls button').disabled})").get("ok").getAsBoolean());
+    evaluate(browser,query,replies,"(()=>{const i=document.querySelector('.boost-input');i.value='谢谢👍';i.dispatchEvent(new Event('input'));i.focus();return {ok:true}})()");
+    var manager=com.intellij.openapi.editor.colors.EditorColorsManager.getInstance();var previous=edt(manager::getGlobalScheme);
+    try {
+      for(boolean dark:new boolean[]{true,false}) {
+        var scheme=Arrays.stream(manager.getAllSchemes()).filter(s->com.intellij.ui.ColorUtil.isDark(s.getDefaultBackground())==dark).findFirst().orElseThrow();
+        edt(()->{manager.setGlobalScheme(scheme);return null;});String bg="#"+com.intellij.ui.ColorUtil.toHex(scheme.getDefaultBackground());
+        await("Boost follows editor theme",()->evaluate(browser,query,replies,"({ok:getComputedStyle(document.documentElement).getPropertyValue('--bg').trim().toLowerCase()==='"+bg.toLowerCase()+"'})").get("ok").getAsBoolean());
+        check("IDE_BOOST_THEME_"+(dark?"DARK":"LIGHT"),evaluate(browser,query,replies,"({ok:document.querySelector('.boost-input').value==='谢谢👍' && document.querySelector('#floor-2 .post-content')===boostBody})").get("ok").getAsBoolean());
+        evaluate(browser,query,replies,"(()=>{document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));document.querySelector('#floor-2 [data-boost-open]').scrollIntoView({block:'center'});return {ok:true}})()");Thread.sleep(300);
+        evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 [data-boost-open]').click();return {ok:true}})()");
+        await("themed Boost beside visible action",()->evaluate(browser,query,replies,"({ok:document.querySelector('.boost-status')?.textContent.includes('Enter')})").get("ok").getAsBoolean());
+        showcaseCapture(frame,"boost-popover-"+(dark?"dark":"light"),!dark);
+      }
+    } finally {edt(()->{manager.setGlobalScheme(previous);return null;});}
+    reject.set(true);
+    evaluate(browser,query,replies,"(()=>{document.querySelector('.boost-controls button').click();return {ok:true}})()");
+    await("Boost failure preserves input",()->evaluate(browser,query,replies,"({ok:document.querySelector('.boost-status')?.textContent.includes('模拟校验失败')})").get("ok").getAsBoolean());
+    check("IDE_BOOST_VALIDATION_RETAINS_INPUT",evaluate(browser,query,replies,"({ok:document.querySelector('.boost-input').value==='谢谢👍' && !document.querySelector('.boost-controls button').disabled})").get("ok").getAsBoolean());
+    showcaseCapture(frame,"boost-retained-error");reject.set(false);
+    evaluate(browser,query,replies,"(()=>{document.querySelector('.boost-input').focus();return {ok:true}})()");
+    edt(()->{frame.toFront();panel.preferredFocusedComponent().requestFocusInWindow();return null;});Thread.sleep(150);
+    evaluate(browser,query,replies,"(()=>{window.boostTop=boostBody.getBoundingClientRect().top;return {ok:true}})()");
+    Robot keys=new Robot();keys.keyPress(java.awt.event.KeyEvent.VK_ENTER);keys.keyRelease(java.awt.event.KeyEvent.VK_ENTER);
+    await("Boost Enter submits and patches only target",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('#floor-2 .boost-bubble')&&!document.querySelector('.boost-popover')})").get("ok").getAsBoolean());
+    check("IDE_BOOST_ONLY_RAW_PAYLOAD",payload.get().keySet().equals(Set.of("raw"))&&payload.get().get("raw").getAsString().equals("谢谢👍"));
+    JsonObject patchCheck=evaluate(browser,query,replies,"({same:document.querySelector('#floor-2 .post-content')===boostBody,delta:Math.abs(boostBody.getBoundingClientRect().top-boostTop),top:boostBody.getBoundingClientRect().top,baseline:boostTop,trace:boostPatchTrace,hasEntry:!!document.querySelector('#floor-2 [data-boost-open]')})");
+    report.println("BOOST_LOCAL_PATCH_DIAGNOSTIC="+patchCheck);
+    check("IDE_BOOST_LOCAL_PATCH_PRESERVES_BODY_AND_POSITION",patchCheck.get("same").getAsBoolean()&&patchCheck.get("delta").getAsDouble()<3&&!patchCheck.get("hasEntry").getAsBoolean());
+    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 .boost-bubble').scrollIntoView({block:'center'});return {ok:true}})()");Thread.sleep(250);
+    check("IDE_BOOST_BUBBLE_VISIBLE",evaluate(browser,query,replies,"(()=>{const r=document.querySelector('#floor-2 .boost-bubble').getBoundingClientRect();return {ok:r.top>=0&&r.bottom<document.querySelector('.topic-navigation').getBoundingClientRect().top}})()").get("ok").getAsBoolean());
+    showcaseCapture(frame,"boost-bubble-own");
+    evaluate(browser,query,replies,"(()=>{const list=document.querySelector('#floor-2 .boost-container');window.boostOriginalList=list.innerHTML;list.style.display='block';for(let n=0;n<80;n++){const row=document.createElement('div');row.className='boost-bubble';row.textContent='示例微回复列表 '+n;row.style.display='block';row.style.height='32px';list.append(row);}list.children[30].scrollIntoView({block:'center'});return {ok:true}})()");Thread.sleep(250);
+    check("IDE_BOOST_AREA_IS_NOT_BODY_READING",evaluate(browser,query,replies,"(()=>{let sample;const original=intellijBridge.readingSample;intellijBridge.readingSample=(floors,scroll,bodyVisible)=>sample={floors,bodyVisible};sampleDocReading();intellijBridge.readingSample=original;return {ok:sample&&!sample.bodyVisible&&sample.floors.length===0}})()").get("ok").getAsBoolean());
+    evaluate(browser,query,replies,"(()=>{const list=document.querySelector('#floor-2 .boost-container');list.innerHTML=boostOriginalList;list.style.removeProperty('display');list.querySelector('[data-boost-delete]').scrollIntoView({block:'center'});return {ok:true}})()");Thread.sleep(250);
+    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 [data-boost-delete]').click();return {ok:true}})()");
+    await("withdraw restores permitted entrance",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('#floor-2 [data-boost-open]')&&!document.querySelector('#floor-2 .boost-bubble')})").get("ok").getAsBoolean());
+    check("IDE_BOOST_OWN_DELETE_RELOADS_CAPABILITY",deletes.get()==1&&sends.get()==initial+2);
+    edt(()->{frame.setSize(400,700);return null;});Thread.sleep(500);
+    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 [data-boost-open]').scrollIntoView({block:'center'});return {ok:true}})()");Thread.sleep(250);
+    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 [data-boost-open]').click();return {ok:true}})()");
+    await("narrow Boost permission read",()->evaluate(browser,query,replies,"({ok:document.querySelector('.boost-status')?.textContent.includes('Enter')})").get("ok").getAsBoolean());
+    check("IDE_BOOST_NARROW_NO_OVERFLOW",evaluate(browser,query,replies,"(()=>{const r=document.querySelector('.boost-popover').getBoundingClientRect();return {ok:r.left>=0&&r.right<=innerWidth&&document.documentElement.scrollWidth<=innerWidth}})()").get("ok").getAsBoolean());
+    showcaseCapture(frame,"boost-popover-narrow");
+    keys.keyPress(java.awt.event.KeyEvent.VK_ESCAPE);keys.keyRelease(java.awt.event.KeyEvent.VK_ESCAPE);
+    await("Escape closes Boost",()->evaluate(browser,query,replies,"({ok:!document.querySelector('.boost-popover')})").get("ok").getAsBoolean());check("IDE_BOOST_ESCAPE_CLOSES",true);
+    float originalScale=com.intellij.ui.scale.JBUIScale.scale(1f);
+    try {
+      edt(()->{com.intellij.ui.scale.JBUIScale.setUserScaleFactor(1.25f);SwingUtilities.updateComponentTreeUI(frame);frame.validate();return null;});Thread.sleep(600);
+      evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 [data-boost-open]').scrollIntoView({block:'center'});return {ok:true}})()");Thread.sleep(250);
+      evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 [data-boost-open]').click();return {ok:true}})()");
+      await("scaled Boost permission read",()->evaluate(browser,query,replies,"({ok:document.querySelector('.boost-status')?.textContent.includes('Enter')})").get("ok").getAsBoolean());
+      check("IDE_BOOST_125_PERCENT_SCALE",evaluate(browser,query,replies,"(()=>{const r=document.querySelector('.boost-popover').getBoundingClientRect();return {ok:r.left>=0&&r.right<=innerWidth&&r.bottom<=document.querySelector('.topic-navigation').getBoundingClientRect().top}})()").get("ok").getAsBoolean());
+      showcaseCapture(frame,"boost-popover-scaled");
+      keys.keyPress(java.awt.event.KeyEvent.VK_ESCAPE);keys.keyRelease(java.awt.event.KeyEvent.VK_ESCAPE);
+    } finally {edt(()->{com.intellij.ui.scale.JBUIScale.setUserScaleFactor(originalScale);SwingUtilities.updateComponentTreeUI(frame);frame.validate();return null;});Thread.sleep(500);}
+    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 [data-boost-open]').click();return {ok:true}})()");
+    await("Boost reopened for scrolling",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('.boost-popover')})").get("ok").getAsBoolean());
+    evaluate(browser,query,replies,"(()=>{scrollBy(0,60);return {ok:true}})()");Thread.sleep(250);
+    check("IDE_BOOST_SCROLL_CLOSES",evaluate(browser,query,replies,"({ok:!document.querySelector('.boost-popover')})").get("ok").getAsBoolean());
+    edt(()->{frame.setSize(960,700);return null;});Thread.sleep(400);
+    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2').scrollIntoView({block:'start'});return {ok:true}})()");Thread.sleep(250);
+    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 [data-boost-open]').click();return {ok:true}})()");
+    await("Boost reopened for resize",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('.boost-popover')})").get("ok").getAsBoolean());
+    edt(()->{frame.setSize(800,700);return null;});Thread.sleep(300);
+    check("IDE_BOOST_RESIZE_CLOSES",evaluate(browser,query,replies,"({ok:!document.querySelector('.boost-popover')})").get("ok").getAsBoolean());
+    evaluate(browser,query,replies,"(()=>{linuxDoSyncStatus('待同步 2 批 · 需要完成 Cloudflare 验证');return {ok:true}})()");
+    check("IDE_PENDING_READ_SYNC_FEEDBACK",evaluate(browser,query,replies,"({ok:!document.querySelector('.read-sync-badge').hidden&&[...document.querySelectorAll('.topic-reader-menu button')].some(b=>b.textContent==='重试已读同步'&&!b.hidden)})").get("ok").getAsBoolean());
+    showcaseCapture(frame,"read-sync-pending");
+    evaluate(browser,query,replies,"(()=>{linuxDoSyncStatus(null);return {ok:document.querySelector('.read-sync-badge').hidden}})()");
+    edt(()->{frame.setSize(960,700);return null;});Thread.sleep(300);
+  }
+  private static void firstOpenReadAcceptance() throws Exception {
+    LinuxDoSettingsState settings=LinuxDoSettingsState.Companion.getInstance();boolean previousAuto=settings.getAutoReportReadTimings();settings.setAutoReportReadTimings(false);
+    var file=com.lgguan.linuxdo.plugin.editor.LinuxDoTopicVirtualFile.INSTANCE.create(999997,"首次打开已读验收",null);
+    var editor=edt(()->new com.lgguan.linuxdo.plugin.editor.LinuxDoTopicFileEditor(project,file));
+    DocViewerPanel panel=(DocViewerPanel)editor.getComponent();
+    JButton toolFocus=new JButton("IDE 工具窗口焦点");
+    JFrame frame=edt(()->{JFrame f=new JFrame("Linux Do first-open read acceptance");JPanel content=new JPanel(new BorderLayout());content.add(panel,BorderLayout.CENTER);content.add(toolFocus,BorderLayout.NORTH);f.setContentPane(content);f.setSize(960,700);f.setLocation(120,100);editor.selectNotify();f.setVisible(true);f.toFront();return f;});
+    try {
+      await("first editor browser ready",()->field(panel,"jbCefBrowser")!=null&&field(panel,"currentTopic")!=null);
+      LinuxDoBrowser browser=(LinuxDoBrowser)edt(()->field(panel,"jbCefBrowser"));
+      LinuxDoJSQuery query=(LinuxDoJSQuery)edt(()->field(panel,"jsQuery"));
+      BlockingQueue<String> replies=new LinkedBlockingQueue<>();
+      @SuppressWarnings("unchecked") Function1<String,LinuxDoJSQuery.Response> handler=(Function1<String,LinuxDoJSQuery.Response>)field(query,"handler");
+      query.addHandler(value->{if(value.startsWith("probe:")){replies.add(value.substring(6));return null;}return handler.invoke(value);});
+      awaitReaderBridge(browser,query,replies);
+      edt(()->{frame.toFront();toolFocus.requestFocusInWindow();return null;});
+      Point origin=edt(frame::getLocationOnScreen);Robot keys=new Robot();keys.mouseMove(origin.x+250,origin.y+45);keys.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);keys.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);
+      await("tool window holds initial focus",()->edt(toolFocus::isFocusOwner)&&evaluate(browser,query,replies,"({ok:!document.hasFocus()&&document.visibilityState==='visible'})").get("ok").getAsBoolean());
+      check("IDE_FIRST_OPEN_SELECTED_BEFORE_BROWSER_READY",(Boolean)field(panel,"editorSelected")&&edt(frame::isActive));
+      check("IDE_FIRST_OPEN_STARTS_WITH_UNREAD_FLOORS",evaluate(browser,query,replies,"({ok:document.querySelectorAll('.unread-dot:not(.read)').length===2})").get("ok").getAsBoolean());
+      check("IDE_UNREAD_DOTS_AT_RIGHT_EDGE",evaluate(browser,query,replies,"({ok:[...document.querySelectorAll('.unread-dot')].every(dot=>Math.abs(dot.getBoundingClientRect().right-dot.closest('.floor-comment-header').getBoundingClientRect().right)<2)})").get("ok").getAsBoolean());
+      evaluate(browser,query,replies,"(()=>{window.beforeReadPositions=[...document.querySelectorAll('.floor-number,.floor-position,.post-content')].map(el=>{const r=el.getBoundingClientRect();return [r.left,r.top,r.width,r.height]});return {ok:true}})()");
+      showcaseCapture(frame,"reader-unread-right");
+      edt(()->{settings.setAutoReportReadTimings(true);return null;});
+      await("first open marks visible floors without switching tabs",()->evaluate(browser,query,replies,"({ok:[...document.querySelectorAll('.unread-dot')].every(el=>getComputedStyle(el).display==='none')})").get("ok").getAsBoolean());
+      check("IDE_FIRST_OPEN_READ_WITH_TOOL_WINDOW_FOCUS",LinuxDoReadTrackingService.Companion.getInstance().isPostRead(999997,1,false,0)&&LinuxDoReadTrackingService.Companion.getInstance().isPostRead(999997,2,false,0)&&edt(toolFocus::isFocusOwner));
+      check("IDE_READ_MARK_PRESERVES_METADATA_AND_BODY_POSITION",evaluate(browser,query,replies,"({ok:[...document.querySelectorAll('.floor-number,.floor-position,.post-content')].every((el,i)=>{const r=el.getBoundingClientRect();return [r.left,r.top,r.width,r.height].every((n,j)=>Math.abs(n-beforeReadPositions[i][j])<.1)})})").get("ok").getAsBoolean());
+      showcaseCapture(frame,"reader-first-open-read");
+      edt(()->{editor.deselectNotify();invoke(field(panel,"readingClock"),"drain",new Class<?>[0]);return null;});Thread.sleep(2200);
+      check("IDE_FIRST_OPEN_HIDDEN_TAB_STOPS_READING",(Boolean)invoke(invoke(field(panel,"readingClock"),"drain",new Class<?>[0]),"isEmpty",new Class<?>[0]));
+    } finally {edt(()->{Disposer.dispose(editor);frame.dispose();settings.setAutoReportReadTimings(previousAuto);return null;});}
   }
   private static JButton retryBrowserButton(Container root) {
     for(Component child:root.getComponents()) {

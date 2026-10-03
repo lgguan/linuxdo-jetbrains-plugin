@@ -240,11 +240,12 @@ object DiscourseApiClient {
         filter: Constants.TopicFilter,
         categorySlug: String? = null,
         categoryId: Int? = null,
-        page: Int = 0
+        page: Int = 0,
+        tag: String? = null
     ): Result<TopicList> {
         val baseUrl = getBaseUrl()
         if (categoryId != null && !categorySlug.isNullOrBlank()) {
-            val url = DiscourseUrls.categoryLatest(baseUrl, categorySlug, categoryId, page)
+            val url = DiscourseUrls.topicList(baseUrl, filter, categorySlug, categoryId, page, tag)
             val result = executeGet<TopicListResponse>(url)
             if (result.isSuccess) {
                 return result.map { it.topicList }
@@ -252,7 +253,7 @@ object DiscourseApiClient {
             val err = result.exceptionOrNull()
             // If 404, fallback to categoryId-only URL in Discourse (/c/:id/l/latest.json)
             if (err?.message?.contains("404") == true) {
-                val fallbackUrl = "$baseUrl/c/$categoryId/l/latest.json?page=$page"
+                val fallbackUrl = DiscourseUrls.topicList(baseUrl, filter, null, categoryId, page, tag)
                 LinuxDoLog.info("Category $categorySlug/$categoryId returned 404, attempting fallback to $fallbackUrl")
                 val fallbackResult = executeGet<TopicListResponse>(fallbackUrl)
                 if (fallbackResult.isSuccess) {
@@ -262,13 +263,7 @@ object DiscourseApiClient {
             return result.map { it.topicList }
         }
 
-        val url = when (filter) {
-            Constants.TopicFilter.LATEST -> DiscourseUrls.latest(baseUrl, page)
-            Constants.TopicFilter.TOP -> DiscourseUrls.top(baseUrl, "weekly", page)
-            Constants.TopicFilter.HOT -> DiscourseUrls.top(baseUrl, "daily", page)
-            Constants.TopicFilter.NEW -> "$baseUrl/new.json?page=$page"
-            Constants.TopicFilter.UNREAD -> "$baseUrl/unread.json?page=$page"
-        }
+        val url = DiscourseUrls.topicList(baseUrl, filter, categorySlug, categoryId, page, tag)
 
         val result = executeGet<TopicListResponse>(url)
         return result.map { it.topicList }
@@ -466,6 +461,8 @@ object DiscourseApiClient {
     }
 
     fun reportTimings(topicId: Long, topicTimeMs: Long, timings: Map<Int, Long>, expectedVersion: Long = SessionEpoch.current): Result<Boolean> {
+        if (topicId <= 0 || topicTimeMs !in 0..60_000 || timings.any { (floor, ms) -> floor <= 0 || ms !in 1..60_000 })
+            return Result.failure(IllegalArgumentException("已读同步批次超出服务器范围"))
         if (expectedVersion != SessionEpoch.current) return Result.failure(com.lgguan.linuxdo.plugin.net.StaleSessionException())
         val url = DiscourseUrls.postTimings(getBaseUrl())
         val session = expectedVersion
@@ -482,7 +479,9 @@ object DiscourseApiClient {
         }
 
         if (shouldUseJcefBridge()) {
-            return LinuxDoJcefBridge.executeForm(url, "POST", formBodyStr, csrf, expectedVersion = session).map { true }
+            return LinuxDoJcefBridge.executeForm(url, "POST", formBodyStr, csrf, expectedVersion = session).mapCatching {
+                parseReaderResponse(it.body.orEmpty()); true
+            }
         }
 
         fun buildRequest(token: String?): Request {
@@ -509,6 +508,7 @@ object DiscourseApiClient {
                 val body = res.body?.string().orEmpty()
                 if (res.isSuccessful) {
                     LinuxDoLog.info("reportTimings success: topicId=$topicId, posts=${timings.keys}")
+                    parseReaderResponse(body)
                     Result.success(true)
                 } else {
                     LinuxDoLog.warn("reportTimings failed HTTP ${res.code}")
@@ -625,56 +625,16 @@ object DiscourseApiClient {
         }
     }
 
-    fun boostPost(postId: Long, content: String, expectedVersion: Long = SessionEpoch.current): Result<Boolean> {
-        if (expectedVersion != SessionEpoch.current) return Result.failure(com.lgguan.linuxdo.plugin.net.StaleSessionException())
-        val baseUrl = getBaseUrl()
-        val url = "$baseUrl/discourse-boosts/posts/$postId/boosts.json"
-        val session = expectedVersion
-        val csrf = getCsrfToken()
-        if (session != SessionEpoch.current) return Result.failure(com.lgguan.linuxdo.plugin.net.StaleSessionException())
-        val trimmed = content.trim()
-        LinuxDoLog.info("boostPost: postId=$postId")
+    fun boostPost(postId: Long, content: String, expectedVersion: Long = SessionEpoch.current): Result<com.lgguan.linuxdo.plugin.model.PostBoost> =
+        readerWrite("/discourse-boosts/posts/$postId/boosts", "POST", JsonObject().apply { addProperty("raw",content.trim()) },expectedVersion)
+            .mapCatching { gson.fromJson(it,com.lgguan.linuxdo.plugin.model.PostBoost::class.java) }
 
-        // Send both flat attributes and nested boost object to ensure Rails strong params match
-        val json = JsonObject().apply {
-            addProperty("raw", trimmed)
-            addProperty("content", trimmed)
-            val boostObj = JsonObject().apply {
-                addProperty("raw", trimmed)
-                addProperty("content", trimmed)
-            }
-            add("boost", boostObj)
-        }
+    fun getBoost(boostId: Long, expectedVersion: Long = SessionEpoch.current): Result<com.lgguan.linuxdo.plugin.model.PostBoost> =
+        readerGet("/discourse-boosts/boosts/$boostId.json",expectedVersion)
+            .mapCatching { gson.fromJson(it,com.lgguan.linuxdo.plugin.model.PostBoost::class.java) }
 
-        if (shouldUseJcefBridge()) {
-            return LinuxDoJcefBridge.executePostJson<JsonObject>(url, json.toString(), csrf, expectedVersion = session).map { true }
-        }
-
-        fun buildRequest(token: String?): Request {
-            val reqBuilder = Request.Builder().tag(SessionEpoch.Stamp::class.java, SessionEpoch.Stamp(session))
-                .url(url)
-                .post(json.toString().toRequestBody(JSON_MEDIA_TYPE))
-            if (!token.isNullOrBlank()) {
-                reqBuilder.header("X-CSRF-Token", token)
-            }
-            return reqBuilder.build()
-        }
-
-        try {
-            val response = executeWrite(csrf, ::buildRequest)
-            return response.use { res ->
-                val body = res.body?.string().orEmpty()
-                if (res.isSuccessful) {
-                    Result.success(true)
-                } else {
-                    Result.failure(HttpFailure.classify(res.code, res.headers.toMap(), body)!!)
-                }
-            }
-        } catch (e: Exception) {
-            LinuxDoLog.error("boostPost exception: ${com.lgguan.linuxdo.plugin.net.NetworkTrace.errorType(e)}", e)
-            return Result.failure(e)
-        }
-    }
+    fun deleteBoost(boostId: Long, expectedVersion: Long = SessionEpoch.current): Result<Boolean> =
+        readerWrite("/discourse-boosts/boosts/$boostId", "DELETE", JsonObject(),expectedVersion).map { true }
 
     fun createTopic(title: String, rawContent: String, categoryId: Int?, tags: List<String> = emptyList(),
         expectedVersion: Long = SessionEpoch.current): Result<Post> =
@@ -766,7 +726,19 @@ object DiscourseApiClient {
         return result.map { it.tags.map { tag -> tag.text.ifBlank { tag.id } } }
     }
 
-    fun searchTags(query: String): Result<List<TagItem>> = searchComposerTags(query, null, emptyList()).map { it.results }
+    fun searchTags(query: String): Result<List<TagItem>> =
+        executeGet<TagSearchResultResponse>(DiscourseUrls.browseTags(getBaseUrl(), query)).map { it.results }
+
+    private val browseTagsCache = SessionCache<TagListResponse>()
+    internal fun browseTags(): Result<TagListResponse> {
+        browseTagsCache.get()?.let { return Result.success(it) }
+        val version = SessionEpoch.current
+        return executeGet<TagListResponse>(DiscourseUrls.tags(getBaseUrl()), version).onSuccess { browseTagsCache.put(version, it) }
+    }
+
+    internal fun searchUsers(query: String): Result<List<String>> = executeGet<JsonObject>(
+        "${getBaseUrl()}/u/search/users.json?term=${java.net.URLEncoder.encode(query, java.nio.charset.StandardCharsets.UTF_8)}")
+        .map { response -> response.getAsJsonArray("users")?.mapNotNull { it.asJsonObject.get("username")?.asString }.orEmpty() }
 
     internal fun searchComposerTags(query: String, categoryId: Int?, selectedIds: List<String>): Result<TagSearchResultResponse> {
         return executeGet(DiscourseUrls.composerTags(getBaseUrl(), query, categoryId, selectedIds))
@@ -780,6 +752,11 @@ object DiscourseApiClient {
     }
 
     private val capabilitiesCache = SessionCache<com.lgguan.linuxdo.plugin.model.ComposerCapabilities>()
+    private val searchCapabilitiesCache = SessionCache<SearchCapabilities>()
+    internal fun searchCapabilities(): Result<SearchCapabilities> {
+        searchCapabilitiesCache.get()?.let { return Result.success(it) }
+        return composerCapabilities().mapCatching { searchCapabilitiesCache.get() ?: error("搜索设置尚未加载") }
+    }
     internal fun composerCapabilities(): Result<com.lgguan.linuxdo.plugin.model.ComposerCapabilities> = runCatching {
         capabilitiesCache.get()?.let { return@runCatching it }
         val version = SessionEpoch.current
@@ -795,6 +772,7 @@ object DiscourseApiClient {
             }
         } }.getOrThrow()
         SessionEpoch.requireCurrent(version)
+        searchCapabilitiesCache.put(version, SearchCapabilities.parse(html))
         com.lgguan.linuxdo.plugin.model.ComposerCapabilities.parse(html).also { capabilitiesCache.put(version, it) }
     }
 }

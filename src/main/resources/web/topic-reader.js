@@ -45,14 +45,106 @@
     const id=post.dataset.postId;
     if (pendingPosts.has(id)) return;
     pendingPosts.add(id); post.classList.add('post-operation-pending');
+    const controls=[...post.querySelectorAll('button,input,select,textarea')].map(control=>({control,disabled:control.disabled}));
+    controls.forEach(({control})=>control.disabled=true);
     try { const result=await call(action,id,input); finish(result); return result; }
-    finally { pendingPosts.delete(id); post.classList.remove('post-operation-pending'); }
+    finally { pendingPosts.delete(id); post.classList.remove('post-operation-pending');controls.forEach(({control,disabled})=>{if(control.isConnected)control.disabled=disabled;}); }
   }
   window.toggleLikeUi = function(el, postId, like) {
     const post=el.closest('.post-entry'); if (!post || pendingPosts.has(String(postId))) return;
     // No eager text replacement: authoritative success/failure patches only this post's actions.
     mutate(post,'like',{like});
   };
+  const boostDrafts=new Map();
+  let boostPopover=null, boostEmojiRules=null;
+  const graphemes=new Intl.Segmenter(undefined,{granularity:'grapheme'});
+  function boostStats(raw,rules=boostEmojiRules){
+    let emoji=0;
+    const names=new Set(rules?.emojiNames||[]),denied=new Set(rules?.deniedEmoji||[]),toned=new Set(rules?.tonedEmoji||[]);
+    const replaced=raw.trim().replace(/:[a-z0-9_+-]+(?::t\d)?:/g,code=>{
+      const name=code.slice(1,-1).replace(/:t\d$/,'');
+      if(names.has(name)){emoji++;return '\uFFFC';}return code;
+    });
+    const clusters=[...graphemes.segment(replaced)];
+    for(const {segment} of clusters){
+      const normalized=segment.replace(/\uFE0F/g,''),base=normalized.replace(/[\u{1F3FB}-\u{1F3FF}]/gu,'');
+      let name=rules?.emojiUnicode?.[normalized];
+      if(!name && base!==normalized && toned.has(rules?.emojiUnicode?.[base]))name=rules.emojiUnicode[base];
+      name=name?.replace(/:t\d$/,'');if(name&&!denied.has(name))emoji++;
+    }
+    return {visible:clusters.length,emoji};
+  }
+  window.linuxDoBoostStats=boostStats;
+  function closeBoost(){
+    if(!boostPopover)return;
+    boostDrafts.set(boostPopover.id,boostPopover.input.value);
+    const anchor=boostPopover.post;
+    boostPopover.box.remove();boostPopover=null;
+    anchor.querySelector('[data-boost-open]')?.focus({preventScroll:true});
+  }
+  function positionBoost(){
+    if(!boostPopover)return;
+    const {box,post}=boostPopover,r=post.getBoundingClientRect();
+    if(!post.isConnected||r.bottom<0||r.top>innerHeight){closeBoost();return;}
+    const anchor=post.querySelector('[data-boost-open]')?.getBoundingClientRect()||r;
+    box.style.left=Math.max(8,Math.min(innerWidth-box.offsetWidth-8,anchor.right-box.offsetWidth))+'px';
+    const bottom=document.querySelector('.topic-navigation')?.getBoundingClientRect().top||innerHeight;
+    box.style.top=Math.max(8,Math.min(bottom-box.offsetHeight-8,anchor.top-box.offsetHeight-8))+'px';
+  }
+  async function openBoost(post){
+    if(pendingPosts.has(post.dataset.postId))return;
+    closeBoost();
+    const id=post.dataset.postId,box=document.createElement('section');
+    box.className='boost-popover';box.setAttribute('role','dialog');box.setAttribute('aria-label','Boost · #'+post.dataset.postNumber);
+    const heading=document.createElement('strong');heading.textContent='Boost · #'+post.dataset.postNumber;
+    const input=document.createElement('input');input.type='text';input.className='boost-input';input.setAttribute('aria-label','Boost 内容');input.placeholder='最多 16 字符、5 个表情';input.value=boostDrafts.get(id)||'';
+    const counter=document.createElement('span');counter.className='boost-counter';
+    const status=document.createElement('p');status.className='boost-status';status.setAttribute('role','status');status.textContent='正在读取服务器权限…';
+    const emojis=document.createElement('div');emojis.className='boost-emoji-picker';emojis.setAttribute('aria-label','表情选择');
+    let allowed=false,busy=false,composing=false;
+    const send=button('发送',submit),cancel=button('取消',closeBoost);
+    const controls=document.createElement('div');controls.className='boost-controls';controls.append(counter,send,cancel);
+    box.append(heading,input,emojis,controls,status);document.body.append(box);
+    const popup={id,box,input,post};boostPopover=popup;
+    function update(){
+      const count=boostStats(input.value);counter.textContent=count.visible+'/16 · '+count.emoji+'/5 表情';
+      send.disabled=busy||!allowed||!boostEmojiRules||!input.value.trim()||count.visible>16||count.emoji>5;
+      input.disabled=busy;emojis.querySelectorAll('button').forEach(b=>b.disabled=busy);positionBoost();
+    }
+    for(const emoji of ['👍','❤️','🎉','🚀','😊','👏','🤝','😂']){
+      const choice=button(emoji,()=>{const start=input.selectionStart,end=input.selectionEnd;input.setRangeText(emoji,start,end,'end');input.focus();update();});
+      choice.setAttribute('aria-label','插入 '+emoji);emojis.append(choice);
+    }
+    input.oninput=()=>{boostDrafts.set(id,input.value);update();};
+    input.addEventListener('compositionstart',()=>composing=true);
+    input.addEventListener('compositionend',()=>{composing=false;update();});
+    input.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing&&!composing&&e.keyCode!==229){e.preventDefault();submit();}};
+    async function submit(){
+      if(send.disabled||composing||pendingPosts.has(id))return;
+      busy=true;status.textContent='正在发送…';update();
+      const result=await mutate(post,'boostSend',{raw:input.value.trim()});
+      busy=false;
+      if(!result?.error){boostDrafts.delete(id);if(boostPopover===popup){input.value='';closeBoost();boostDrafts.delete(id);}return;}
+      if(boostPopover!==popup)return;
+      status.textContent=result.error;update();
+    }
+    update();input.focus();
+    const result=await call('boostInfo',id);
+    if(boostPopover!==popup)return;
+    if(result.error){status.textContent=result.error;return;}
+    boostEmojiRules=result;allowed=result.allowed===true;
+    status.textContent=allowed?'Enter 发送 · Esc 关闭':'服务器未允许发送 Boost，或您已 Boost 此楼层';update();
+  }
+  document.addEventListener('click',e=>{
+    const open=e.target.closest('[data-boost-open]'),remove=e.target.closest('[data-boost-delete]');
+    if(open){openBoost(open.closest('.post-entry'));return;}
+    if(remove){closeBoost();mutate(remove.closest('.post-entry'),'boostDelete',{boostId:remove.dataset.boostDelete});return;}
+    if(boostPopover&&!boostPopover.box.contains(e.target))closeBoost();
+  });
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&boostPopover){e.preventDefault();closeBoost();}});
+  addEventListener('resize',e=>{if(e.isTrusted)closeBoost();else positionBoost();});
+  addEventListener('scroll',closeBoost,{passive:true});
+  new MutationObserver(()=>{if(boostPopover&&!boostPopover.post.isConnected)closeBoost();}).observe(document.querySelector('.doc-container'),{childList:true,subtree:true});
   function jumpButton(box, item, quote=true, topic=config.topic) {
     const row=document.createElement('div'); row.className='topic-reader-result';
     row.append(button('#'+item.floor+' @'+(item.author || ''),()=>topic===config.topic?window.linuxDoPagination?.jump(item.floor):window.intellijBridge?.handleLinkClick('https://linux.do/t/'+topic+'/'+item.floor)));
@@ -150,6 +242,9 @@
     menu.querySelectorAll('section').forEach(box=>box.hidden=![...box.querySelectorAll('button')].some(b=>!b.hidden));
   }
   window.refreshDocReaderTools=refreshTools;
+  let syncStatus=null;
+  const syncBadge=document.createElement('span');syncBadge.className='read-sync-badge';syncBadge.hidden=true;summary.append(syncBadge);
+  window.linuxDoSyncStatus=status=>{syncStatus=status;syncBadge.hidden=!status;syncBadge.textContent=status?'待同步':'';summary.title=status||'阅读工具';refreshTools();};
   const navigation=group('阅读'),filters=group('筛选'),account=group('话题');
   const multiple=()=>window.linuxDoPagination?.lastFloor()>1;
   const signedIn=()=>config.loggedIn===true;
@@ -166,6 +261,7 @@
   tool(filters,'全部楼层',()=>filter(''),()=>config.filtered===true);
   tool(account,'通知',subscription,()=>signedIn()&&config.notificationLevel!==null&&config.notificationLevel!==undefined);
   tool(account,'我的书签',bookmarks,signedIn);
+  tool(account,'重试已读同步',async()=>finish(await call('retryReadSync',0)),()=>!!syncStatus&&signedIn());
   if(config.canVote===true || config.userVoted===true) {
     const label=()=> (config.userVoted?'撤回话题投票 ':'话题投票 ')+(config.voteCount ?? 0);
     const vote=button(label(),async()=>{vote.disabled=true;const result=await call('topicVote',0,{});finish(result);vote.disabled=!(config.canVote||config.userVoted)||!config.loggedIn;vote.textContent=label();vote.title='投票余额 '+(config.votesLeft ?? '服务器未提供');});

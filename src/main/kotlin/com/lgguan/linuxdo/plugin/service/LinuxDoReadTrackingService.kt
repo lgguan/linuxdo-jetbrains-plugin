@@ -12,7 +12,7 @@ import com.lgguan.linuxdo.plugin.net.SessionEpoch
 @State(name = "com.lgguan.linuxdo.plugin.service.LinuxDoReadTrackingService", storages = [Storage("LinuxDoReadTracking.xml")])
 class LinuxDoReadTrackingService(
     private val account: () -> String = { LinuxDoAuthService.getInstance().currentUser?.id?.toString() ?: "guest" }
-) : PersistentStateComponent<LinuxDoReadTrackingService.State> {
+) : PersistentStateComponent<LinuxDoReadTrackingService.State>, com.intellij.openapi.Disposable {
     class State {
         // Legacy unscoped data cannot safely be assigned to any account.
         var readTopicIds: MutableSet<Long> = mutableSetOf()
@@ -20,15 +20,41 @@ class LinuxDoReadTrackingService(
         var readFloorSets: MutableMap<String, String> = mutableMapOf()
         var positions: MutableMap<String, Int> = mutableMapOf()
         var floors: MutableMap<String, String> = mutableMapOf()
+        var pendingReadBatches: MutableList<PendingReadBatch> = mutableListOf()
     }
     private var data = State()
+    private val queue = ReadSyncQueue()
+    private val tasks = com.lgguan.linuxdo.plugin.common.BackgroundTasks()
+    private val pumping = java.util.concurrent.atomic.AtomicBoolean()
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+    @Volatile private var disposed = false
+    private var scheduled: java.util.concurrent.ScheduledFuture<*>? = null
+    private var authListener: ((com.lgguan.linuxdo.plugin.model.UserInfo?) -> Unit)? = null
+    internal fun identity() = ReadIdentity(LinuxDoSettingsState.getInstance().baseUrl.trimEnd('/'), account())
+    init {
+        // Defer obtaining AuthService until this persistent component has been constructed.
+        ApplicationManager.getApplication()?.invokeLater {
+            if (!disposed) {
+                val listener: (com.lgguan.linuxdo.plugin.model.UserInfo?) -> Unit = { user ->
+                    if (user != null) { queue.resume(identity()); pump() }
+                }
+                authListener = listener
+                LinuxDoAuthService.getInstance().addAuthListener(listener)
+                if (LinuxDoAuthService.getInstance().isLoggedIn) queue.resume(identity())
+                scheduled = com.intellij.util.concurrency.AppExecutorUtil.getAppScheduledExecutorService()
+                    .scheduleWithFixedDelay({ pump() }, 1, 1, java.util.concurrent.TimeUnit.SECONDS)
+            }
+        }
+    }
     private fun key(topicId: Long) = "${account()}:$topicId"
     @Synchronized override fun getState(): State = State().also {
         it.positions.putAll(data.positions)
         it.floors.putAll(data.floors)
+        it.pendingReadBatches = queue.snapshot()
     }
     @Synchronized override fun loadState(state: State) {
         data = State().also { it.positions.putAll(state.positions); it.floors.putAll(state.floors) }
+        queue.restore(state.pendingReadBatches)
     }
     private fun floors(topicId: Long): Set<Int> = data.floors[key(topicId)].orEmpty().split(',').mapNotNull(String::toIntOrNull).toSet()
     @Synchronized fun isRead(topicId: Long): Boolean = key(topicId) in data.positions
@@ -62,16 +88,48 @@ class LinuxDoReadTrackingService(
     }
     @Synchronized fun getLastReadPostNumber(topicId: Long): Int? = data.positions[key(topicId)]
 
-    fun submitTimings(topicId: Long, timings: Map<Int, Long>, version: Long) {
-        if (timings.isEmpty() || !LinuxDoSettingsState.getInstance().autoReportReadTimings ||
-            !LinuxDoAuthService.getInstance().isLoggedIn || version != SessionEpoch.current) return
-        ApplicationManager.getApplication()?.executeOnPooledThread {
-            if (version == SessionEpoch.current && LinuxDoSettingsState.getInstance().autoReportReadTimings) {
-                DiscourseApiClient.reportTimings(topicId, timings.values.sum(), timings, version).onFailure { error ->
-                    com.lgguan.linuxdo.plugin.common.LinuxDoLog.warn("已读同步失败，本地记录已保留：${error.javaClass.simpleName}")
+    internal fun submitTimings(topicId: Long, batch: ReadingBatch, identity: ReadIdentity) {
+        if (batch.isEmpty() || identity.accountId == "guest") return
+        // The reader captured this identity before sampling; closing an old account's page
+        // still preserves its final evidence, without assigning it to the newly signed-in user.
+        queue.enqueue(identity, topicId, batch)
+        pump()
+    }
+    fun syncStatus(topicId: Long): String? = queue.status(identity(), topicId)?.let {
+        it + if (LinuxDoSettingsState.getInstance().autoReportReadTimings) "" else " · 自动同步已关闭"
+    }
+    fun retrySync() { queue.resume(identity()); pump() }
+    fun addSyncListener(owner: com.intellij.openapi.Disposable, changed: () -> Unit) {
+        listeners.add(changed)
+        com.intellij.openapi.util.Disposer.register(owner, com.intellij.openapi.Disposable { listeners.remove(changed) })
+    }
+    private fun pump() {
+        if (disposed || !LinuxDoSettingsState.getInstance().autoReportReadTimings ||
+            !LinuxDoAuthService.getInstance().isLoggedIn || !pumping.compareAndSet(false, true)) return
+        tasks.submit {
+            try {
+                val version = SessionEpoch.current
+                val account = identity()
+                if (!LinuxDoSettingsState.getInstance().autoReportReadTimings) return@submit
+                val batch = queue.take(account) ?: return@submit
+                val result = runCatching {
+                    SessionEpoch.requireCurrent(version)
+                    check(account == identity())
+                    if (!LinuxDoSettingsState.getInstance().autoReportReadTimings) throw com.lgguan.linuxdo.plugin.net.StaleSessionException()
+                    DiscourseApiClient.reportTimings(batch.topicId, batch.topicTimeMs, batch.timings, version).getOrThrow()
                 }
+                queue.complete(batch.id, result)
+                if (result.getOrNull() == true) ApplicationManager.getApplication()?.invokeLater {
+                    if (!disposed && version == SessionEpoch.current && account == identity()) listeners.forEach { it() }
+                }
+            } finally {
+                pumping.set(false)
             }
         }
+    }
+    override fun dispose() {
+        disposed = true; scheduled?.cancel(false); tasks.dispose(); listeners.clear()
+        authListener?.let { LinuxDoAuthService.getInstance().removeAuthListener(it) }
     }
     companion object {
         private val fallback by lazy { LinuxDoReadTrackingService() }

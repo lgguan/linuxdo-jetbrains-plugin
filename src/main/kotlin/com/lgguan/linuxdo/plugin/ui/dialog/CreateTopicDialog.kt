@@ -98,6 +98,10 @@ class CreateTopicDialog private constructor(
     private val tagMetadata = mutableMapOf<String, TagItem>()
     private val invalidTags = mutableMapOf<String, String>()
     private val tagStatus = JBLabel()
+    private var tagHint: com.lgguan.linuxdo.plugin.model.TagHint = com.lgguan.linuxdo.plugin.model.TagHint.Hidden
+    private var tagCheckFailed = false
+    private val tagRetry = JButton("重试检查").apply { isVisible = false; addActionListener { validateSelectedTags() } }
+    private val tagHintPanel = JPanel(BorderLayout(4, 0)).apply { add(tagStatus); add(tagRetry, BorderLayout.EAST); isVisible = false }
     private var tagGeneration = 0L
     private var validatingTags = false
     private var tagValidationGeneration = 0L
@@ -131,17 +135,10 @@ class CreateTopicDialog private constructor(
 
     // Tags dynamic search components
     private val tagInputField = JBTextField(12)
-    private val tagSelectButton = JButton("选择标签（可选）  ▾").apply {
-        name = "composer-tag-picker"
-        horizontalAlignment = SwingConstants.LEFT
-        toolTipText = "搜索并选择标签"
-        accessibleContext.accessibleName = "选择标签"
-    }
+    private val tagField = TagSelectionField(TagSelectionField.Mode.COMPOSE, ::removeTag)
+    private val tagSelectButton = tagField.picker
     private val tagPickerStatus = JBLabel()
-    private val tagsPanel = JPanel(ComposerWrapLayout()).apply {
-        isVisible = false
-        border = JBUI.Borders.empty(2, 0)
-    }
+    private val tagsPanel = tagField.chips
     private val selectedTags = linkedSetOf<String>()
 
     // Searchable tag checklist keeps multiple selections in the same popup.
@@ -232,33 +229,11 @@ class CreateTopicDialog private constructor(
         formPanel.add(Box.createVerticalStrut(JBUI.scale(6)))
 
         // Row 2: Category Dropdown + Tags Dynamic Search
-        val catTagRow = JPanel(GridBagLayout())
-        val gbc = GridBagConstraints()
-        gbc.fill = GridBagConstraints.BOTH
-        gbc.gridy = 0
-        gbc.weighty = 1.0
-
-        // Left: Category
-        gbc.gridx = 0
-        gbc.weightx = 0.45
-        gbc.insets = JBUI.insets(0, 0, 0, 6)
         categoryComboBox.preferredSize = Dimension(0, JBUI.scale(28))
-        catTagRow.add(categoryComboBox, gbc)
-
-        // Right: Tags input container with dynamic suggestion
-        gbc.gridx = 1
-        gbc.weightx = 0.55
-        gbc.insets = JBUI.emptyInsets()
         tagInputField.emptyText.text = "搜索标签…"
         tagInputField.name = "composer-tag-search"
-        tagSelectButton.preferredSize = Dimension(JBUI.scale(140), JBUI.scale(28))
-        tagSelectButton.minimumSize = Dimension(0, JBUI.scale(28))
-        catTagRow.add(tagSelectButton, gbc)
-
-        formPanel.add(catTagRow)
-
-        // Preloaded / Recommended Quick Tags Panel
-        formPanel.add(tagStatus)
+        val tagColumn = JPanel(BorderLayout(0, 3)).apply { add(tagField); add(tagHintPanel, BorderLayout.SOUTH) }
+        formPanel.add(ResponsiveFilterRow(categoryComboBox, tagColumn))
 
         // Tags Chip Panel (Compact, visible only when tags exist)
         formPanel.add(Box.createVerticalStrut(JBUI.scale(4)))
@@ -295,6 +270,12 @@ class CreateTopicDialog private constructor(
 
         setupTagSuggestionsList()
         setupEventListeners()
+        ComposerAppearance.followTheme(disposable, rootPanel, textArea, editorPanel, titleField) {
+            updateValidation()
+            setTagHint(tagHint)
+            tagField.render(selectedTags, invalidTags)
+            previewView.refreshTheme()
+        }
         schedulePreviewUpdate()
 
         return rootPanel
@@ -302,7 +283,7 @@ class CreateTopicDialog private constructor(
 
     private fun createBannerPanel(): JPanel {
         val banner = JPanel(BorderLayout()).apply {
-            background = UIUtil.getPanelBackground()
+            background = JBColor.namedColor("Panel.background", UIUtil.getPanelBackground())
             border = CompoundBorder(
                 JBUI.Borders.customLine(JBColor.border(), 1),
                 JBUI.Borders.empty(6, 10)
@@ -314,7 +295,7 @@ class CreateTopicDialog private constructor(
             add(JBLabel(AllIcons.General.Information))
             val tipLabel = JBLabel("请在发帖前仔细阅读社区准则：").apply {
                 font = font.deriveFont(Font.PLAIN, 12f)
-                foreground = UIUtil.getContextHelpForeground()
+                foreground = JBColor.namedColor("ContextHelp.foreground", UIUtil.getContextHelpForeground())
             }
             add(tipLabel)
             val actionLink = ActionLink("《社区准则》") {
@@ -369,6 +350,7 @@ class CreateTopicDialog private constructor(
     }
 
     private fun setupTagSuggestionsList() {
+        tagField.followPopup { tagPopup }
         tagSuggestionsList.selectionMode = ListSelectionModel.SINGLE_SELECTION
         tagSuggestionsList.fixedCellHeight = JBUI.scale(34)
         tagSuggestionsList.cellRenderer = object : ListCellRenderer<TagItem> {
@@ -425,6 +407,7 @@ class CreateTopicDialog private constructor(
             if (!suppressDraft) {
                 categoryComboBox.hidePopup()
                 restoredCategory = null
+                setTagHint(com.lgguan.linuxdo.plugin.model.TagHint.Hidden)
                 val category = categories.firstOrNull { it.id == (categoryComboBox.selectedItem as? CategoryItem)?.id }
                 if (textArea.text.isBlank() && baseline.empty && category?.topicTemplate?.isNotBlank() == true) textArea.text = category.topicTemplate
                 validateSelectedTags()
@@ -477,7 +460,8 @@ class CreateTopicDialog private constructor(
         }
         tagInputField.addKeyListener(tagKeys)
         tagSuggestionsList.addKeyListener(tagKeys)
-        tagSelectButton.addActionListener { if (tagPopup?.isVisible == true) tagPopup?.cancel() else showTagPopup() }
+        tagField.openPopup = { showTagPopup() }
+        tagField.currentPopup = { tagPopup }
 
         // The IDE paste action is the sole keyboard paste handler, including custom keymaps.
         com.intellij.openapi.project.DumbAwareAction.create {
@@ -583,8 +567,7 @@ class CreateTopicDialog private constructor(
                     result.onSuccess { response ->
                         tagPickerStatus.toolTipText = null
                         response.results.forEach { tagMetadata[it.text] = it }
-                        response.requiredTagGroup?.let { tagStatus.text = "至少 ${it.minCount} 个「${it.name}」标签；发布时由论坛校验" }
-                        if (response.forbidden) tagStatus.text = response.forbiddenMessage ?: "此类别不允许这些标签"
+                        // Composer hints are owned by validation, not a concurrent suggestion request.
                         showTagSuggestions(response.results.distinctBy { it.text }.filter { it.text !in selectedTags })
                         tagPickerStatus.text = when {
                             response.forbidden -> response.forbiddenMessage ?: "此板块不允许这些标签"
@@ -605,30 +588,45 @@ class CreateTopicDialog private constructor(
         val generation = ++tagValidationGeneration
         val category = (categoryComboBox.selectedItem as? CategoryItem)?.id
         val snapshot = selectedTags.toList()
+        val metadata = tagMetadata.toMap()
         val version = draftSession.version
         invalidTags.clear()
+        renderTagChips()
+        tagCheckFailed = false
+        setTagHint(com.lgguan.linuxdo.plugin.model.TagHint.Hidden)
         if (version != SessionEpoch.current) { validatingTags = false; updateValidation(); return }
-        if (category == null || snapshot.isEmpty()) { validatingTags = false; updateValidation(); return }
+        if (category == null) { validatingTags = false; updateValidation(); return }
         validatingTags = true
+        setTagHint(com.lgguan.linuxdo.plugin.model.TagHint.Checking)
         updateValidation()
         tagValidationAlarm.addRequest({ backgroundTasks.submit {
             val result = runCatching {
-                snapshot.associateWith { name ->
-                    val response = environment.tags(name, category, emptyList())
-                    response.results.firstOrNull { it.text == name || it.name == name } ?: error("标签「$name」不可用")
+                val context = environment.tags("", category, snapshot.mapNotNull { metadata[it]?.id })
+                val known = metadata.toMutableMap().apply { context.results.forEach { put(it.text, it) } }
+                val results = snapshot.associateWith { name ->
+                    val response = environment.tags(name, category, snapshot.filter { it != name }.mapNotNull { known[it]?.id })
+                    (response.results.firstOrNull { it.text == name || it.name == name } ?: error("标签「$name」不可用"))
+                        .also { known[name] = it }
                 }
+                // Recheck the outstanding group after resolving restored tag IDs.
+                environment.tags("", category, results.values.map { it.id }).requiredTagGroup to results
             }
             ApplicationManager.getApplication().invokeLater({
                 if (isDisposed || generation != tagValidationGeneration || version != SessionEpoch.current || category != (categoryComboBox.selectedItem as? CategoryItem)?.id || snapshot != selectedTags.toList()) return@invokeLater
                 validatingTags = false
-                result.onSuccess { results ->
-                    tagStatus.toolTipText = null
+                result.onSuccess { (required, results) ->
                     results.forEach { (name, tag) -> tagMetadata[name] = tag; if (tag.disabled) invalidTags[name] = tag.title ?: "不能用于此类别" }
-                    tagStatus.text = if (invalidTags.isEmpty()) "标签已按当前类别检查；必选组由论坛最终校验" else invalidTags.entries.joinToString("；") { "${it.key}：${it.value}" }
+                    setTagHint(when {
+                        invalidTags.isNotEmpty() -> com.lgguan.linuxdo.plugin.model.TagHint.Warning("请修正不可用的标签", invalidTags.entries.joinToString("；") { "${it.key}：${it.value}" })
+                        required != null -> com.lgguan.linuxdo.plugin.model.TagHint.Required(required)
+                        (categories.firstOrNull { it.id == category }?.minimumRequiredTags ?: 0) > snapshot.size ->
+                            com.lgguan.linuxdo.plugin.model.TagHint.Required(com.lgguan.linuxdo.plugin.model.RequiredTagGroup("此板块", categories.first { it.id == category }.minimumRequiredTags))
+                        else -> com.lgguan.linuxdo.plugin.model.TagHint.Hidden
+                    })
                 }.onFailure { error ->
+                    tagCheckFailed = true
                     snapshot.forEach { invalidTags[it] = "尚未确认，请重试标签检查" }
-                    tagStatus.text = tagFailureMessage(error)
-                    tagStatus.toolTipText = ComposerErrors.parse(error)
+                    setTagHint(com.lgguan.linuxdo.plugin.model.TagHint.Warning(tagFailureMessage(error), ComposerErrors.parse(error)))
                 }
                 renderTagChips()
                 tagSuggestionsList.repaint()
@@ -643,6 +641,22 @@ class CreateTopicDialog private constructor(
         else -> "标签读取失败；点击重试或修改搜索词"
     }
 
+    private fun setTagHint(hint: com.lgguan.linuxdo.plugin.model.TagHint) {
+        tagHint = hint
+        tagStatus.text = when (hint) {
+            com.lgguan.linuxdo.plugin.model.TagHint.Hidden -> ""
+            com.lgguan.linuxdo.plugin.model.TagHint.Checking -> "正在检查标签…"
+            is com.lgguan.linuxdo.plugin.model.TagHint.Required -> "至少 ${hint.group.minCount} 个「${hint.group.name}」标签"
+            is com.lgguan.linuxdo.plugin.model.TagHint.Warning -> hint.message
+        }
+        tagStatus.toolTipText = (hint as? com.lgguan.linuxdo.plugin.model.TagHint.Warning)?.detail
+        tagStatus.icon = if (hint is com.lgguan.linuxdo.plugin.model.TagHint.Warning) AllIcons.General.Warning else null
+        tagStatus.foreground = UIUtil.getContextHelpForeground()
+        tagRetry.isVisible = hint is com.lgguan.linuxdo.plugin.model.TagHint.Warning
+        tagHintPanel.isVisible = hint != com.lgguan.linuxdo.plugin.model.TagHint.Hidden
+        tagHintPanel.revalidate()
+    }
+
     private fun showTagSuggestions(items: List<TagItem>) {
         val previous = tagSuggestionsList.selectedValue?.text
         tagSuggestionsModel.clear()
@@ -655,8 +669,7 @@ class CreateTopicDialog private constructor(
         tagSuggestionsModel.clear()
         tagInputField.text = ""
         tagPickerStatus.text = "正在读取标签…"
-        val popupWidth = tagSelectButton.width.coerceAtLeast(JBUI.scale(390))
-        tagsPanel.setSize(popupWidth, tagsPanel.height)
+        val popupWidth = tagField.width.coerceAtLeast(JBUI.scale(390))
         val content = object : JPanel(BorderLayout(0, 0)) {
             override fun getPreferredSize(): Dimension = super.getPreferredSize().apply {
                 width = popupWidth + insets.left + insets.right
@@ -677,6 +690,7 @@ class CreateTopicDialog private constructor(
                 }, BorderLayout.SOUTH)
             }, BorderLayout.SOUTH)
         }
+        DialogTheme.refresh(content, includeWindow = false)
         val popup = JBPopupFactory.getInstance()
             .createComponentPopupBuilder(content, tagInputField)
             .setRequestFocus(true)
@@ -691,12 +705,13 @@ class CreateTopicDialog private constructor(
             override fun onClosed(event: LightweightWindowEvent) {
                 if (tagPopup === popup) {
                     tagPopup = null
+                    tagSelectButton.repaint()
                     ++tagGeneration
                     tagAlarm.cancelAllRequests()
                 }
             }
         })
-        popup.show(RelativePoint(tagSelectButton, Point(0, tagSelectButton.height)))
+        popup.show(RelativePoint(tagField, Point(0, tagField.height)))
         scheduleTagSearch()
         if (invalidTags.isNotEmpty()) validateSelectedTags()
     }
@@ -743,7 +758,7 @@ class CreateTopicDialog private constructor(
             }
             if (!selectedTags.contains(clean)) {
                 val tag = tagMetadata[clean]
-                if (tag?.disabled == true) { tagStatus.text = tag.title ?: "不能用于此类别"; return }
+                if (tag?.disabled == true) { setTagHint(com.lgguan.linuxdo.plugin.model.TagHint.Warning(tag.title ?: "不能用于此类别")); return }
                 selectedTags.add(clean)
                 validateSelectedTags()
                 onContentChanged()
@@ -754,55 +769,7 @@ class CreateTopicDialog private constructor(
     }
 
     private fun renderTagChips() {
-        tagsPanel.removeAll()
-        tagSelectButton.text = if (selectedTags.isEmpty()) "选择标签（可选） ▾" else selectedTags.joinToString("、") + " ▾"
-        tagSelectButton.toolTipText = if (selectedTags.isEmpty()) "搜索并选择标签" else selectedTags.joinToString("、")
-        if (selectedTags.isEmpty()) {
-            tagsPanel.isVisible = false
-            tagsPanel.revalidate()
-            tagsPanel.repaint()
-            tagPopup?.pack(false, true)
-            return
-        }
-
-        tagsPanel.isVisible = true
-        for (tag in selectedTags) {
-            val chip = JPanel(BorderLayout(6, 0)).apply {
-                background = JBColor(0xEAEEF2, 0x2D3136)
-                border = CompoundBorder(
-                    JBUI.Borders.customLine(JBColor.border(), 1),
-                    JBUI.Borders.empty(2, 6)
-                )
-
-                val tagLabel = JBLabel(tag).apply {
-                    font = font.deriveFont(Font.PLAIN, 11f)
-                    foreground = JBColor(0x24292F, 0xC9D1D9)
-                    border = JBUI.Borders.empty(0, 0, 0, 2)
-                }
-
-                val delLabel = JButton("×").apply {
-                    name = "composer-remove-tag-$tag"
-                    getAccessibleContext().accessibleName = "移除标签 $tag"
-                    font = font.deriveFont(Font.BOLD, 12f)
-                    foreground = JBColor(0x8C959F, 0x8B949E)
-                    margin = JBUI.emptyInsets()
-                    border = JBUI.Borders.empty(0, 1)
-                    preferredSize = Dimension(JBUI.scale(16), JBUI.scale(18))
-                    minimumSize = preferredSize
-                    isOpaque = false; isContentAreaFilled = false
-                    cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                    toolTipText = "移除标签"
-                    isEnabled = textArea.isEnabled
-                    addActionListener { removeTag(tag) }
-                }
-
-                add(tagLabel, BorderLayout.CENTER)
-                add(delLabel, BorderLayout.WEST)
-            }
-            tagsPanel.add(chip)
-        }
-        tagsPanel.revalidate()
-        tagsPanel.repaint()
+        tagField.render(selectedTags, invalidTags)
         tagPopup?.pack(false, true)
     }
 
@@ -818,7 +785,7 @@ class CreateTopicDialog private constructor(
     private fun snapshot() = TopicDraftContent(titleField.text, textArea.text, (categoryComboBox.selectedItem as? CategoryItem)?.id ?: restoredCategory, selectedTags.toList())
     private fun setEditable(enabled: Boolean) {
         titleField.isEnabled = enabled; textArea.isEnabled = enabled; categoryComboBox.isEnabled = enabled
-        tagInputField.isEnabled = enabled; tagSelectButton.isEnabled = enabled; tagsPanel.isEnabled = enabled
+        tagInputField.isEnabled = enabled; tagField.isEnabled = enabled
         tagsPanel.components.filterIsInstance<JPanel>().flatMap { it.components.toList() }.filterIsInstance<JButton>().forEach { it.isEnabled = enabled }
         if (!enabled) tagPopup?.cancel()
     }
@@ -834,7 +801,8 @@ class CreateTopicDialog private constructor(
         titleCounterLabel.foreground = if (titleValid) UIUtil.getContextHelpForeground() else JBColor.RED
         bodyCounterLabel.foreground = if (bodyValid) UIUtil.getContextHelpForeground() else JBColor.RED
         isOKActionEnabled = titleValid && bodyValid && categoriesReady && category?.permission == 1 && environment.loggedIn &&
-            content.tags.size in (category.minimumRequiredTags)..capabilities.maxTags && invalidTags.isEmpty() && !validatingTags &&
+            content.tags.size in (category.minimumRequiredTags)..capabilities.maxTags && invalidTags.isEmpty() && !validatingTags && !tagCheckFailed &&
+            tagHint !is com.lgguan.linuxdo.plugin.model.TagHint.Required &&
             draftReady && !draftBusy && !draftBlocked && !draftSession.conflicted && !publishing && !unconfirmed &&
             !capabilities.readOnly && imageUpload.pending == 0 && imageUpload.failures == 0 && draftSession.version == SessionEpoch.current
         statusLabel.text = when {
@@ -850,6 +818,7 @@ class CreateTopicDialog private constructor(
             !bodyValid -> "正文需要 ${capabilities.minTopicBody}–${capabilities.maxBody} 个字符"
             validatingTags -> "正在检查标签…"
             invalidTags.isNotEmpty() -> "请修正不可用的标签"
+            tagHint is com.lgguan.linuxdo.plugin.model.TagHint.Required -> tagStatus.text
             else -> "${if (capabilities.confirmed) "就绪" else "论坛设置未确认，将由服务器校验"} (${PlatformShortcuts.submitLabel} 发布)"
         }
     }
@@ -878,7 +847,7 @@ class CreateTopicDialog private constructor(
         ComposerCategories.options(categories).forEach(categoryComboBox::addItem)
         val index = (0 until categoryComboBox.itemCount).firstOrNull { categoryComboBox.getItemAt(it).id == previous }
         categoryComboBox.selectedIndex = index ?: 0
-        if (index == null && restoredCategory != null) tagStatus.text = "草稿原版块不可发帖，请选择其他版块"
+        if (index == null && restoredCategory != null) setTagHint(com.lgguan.linuxdo.plugin.model.TagHint.Warning("草稿原版块不可发帖，请选择其他版块"))
         if (index != null) restoredCategory = null
         suppressDraft = false
     }

@@ -1,0 +1,200 @@
+{
+  "url": "https://linux.do/search?expanded=true",
+  "loggedIn": true,
+  "taggingEnabled": true,
+  "nativeFilters": {
+    "inOptions": [
+      {
+        "name": "我创建",
+        "value": "created"
+      },
+      {
+        "name": "我发过帖",
+        "value": "posted"
+      },
+      {
+        "name": "我赞过",
+        "value": "likes"
+      },
+      {
+        "name": "我已添加为书签",
+        "value": "bookmarks"
+      },
+      {
+        "name": "我读过",
+        "value": "seen"
+      },
+      {
+        "name": "我还没读过",
+        "value": "unseen"
+      },
+      {
+        "name": "我正在关注",
+        "value": "watching"
+      },
+      {
+        "name": "我正在跟踪",
+        "value": "tracking"
+      },
+      {
+        "name": "包含消息",
+        "value": "all"
+      },
+      {
+        "name": "在我的消息中",
+        "value": "messages"
+      },
+      {
+        "name": "是第一个帖子",
+        "value": "first"
+      },
+      {
+        "name": "被置顶",
+        "value": "pinned"
+      },
+      {
+        "name": "Wiki",
+        "value": "wiki"
+      },
+      {
+        "name": "包含图片",
+        "value": "images"
+      },
+      {
+        "name": "仅在标题中匹配",
+        "value": "title"
+      }
+    ],
+    "statusOptions": [
+      {
+        "name": "开放",
+        "value": "open"
+      },
+      {
+        "name": "已关闭",
+        "value": "closed"
+      },
+      {
+        "name": "公开",
+        "value": "public"
+      },
+      {
+        "name": "已归档",
+        "value": "archived"
+      },
+      {
+        "name": "没有回复",
+        "value": "noreplies"
+      },
+      {
+        "name": "包含一个用户",
+        "value": "single_user"
+      },
+      {
+        "name": "已被解决",
+        "value": "solved"
+      },
+      {
+        "name": "尚未解决",
+        "value": "unsolved"
+      }
+    ],
+    "postTimeOptions": [
+      {
+        "name": "早于",
+        "value": "before"
+      },
+      {
+        "name": "晚于",
+        "value": "after"
+      }
+    ],
+    "expertKeys": [],
+    "expertMethods": [
+      {
+        "name": "_updateCategoryExpertTerm",
+        "source": "_updateCategoryExpertTerm(e,t){let o=this.searchTerm||\"\"\ne?o+=` ${t}`:o=o.replace(t,\"\"),this._updateSearchTerm(o)}"
+      },
+      {
+        "name": "updateWithCategoryExpertResponse",
+        "source": "updateWithCategoryExpertResponse(){this._updateCategoryExpertTerm(this.searchedTerms.withCategoryExpertResponse,\"with:category_expert_response\")}"
+      },
+      {
+        "name": "updateIsCategoryExpertQuestion",
+        "source": "updateIsCategoryExpertQuestion(){this._updateCategoryExpertTerm(this.searchedTerms.isCategoryExpertQuestion,\"is:category_expert_question\")}"
+      },
+      {
+        "name": "updateWithoutCategoryExpertPost",
+        "source": "updateWithoutCategoryExpertPost(){this._updateCategoryExpertTerm(this.searchedTerms.withoutCategoryExpertPost,\"without:category_expert_post\")}"
+      }
+    ]
+  },
+  "featureSettings": {
+    "min_personal_message_post_length": 3,
+    "min_personal_message_title_length": 2,
+    "tagging_enabled": true,
+    "no_ads_for_personal_messages": true,
+    "enable_category_experts": true,
+    "show_category_expert_advanced_search_filters": true,
+    "category_experts_posts_require_approval": true,
+    "category_experts_topic_list_link_to_posts": false,
+    "post_voting_enabled": true,
+    "post_voting_comment_enabled": true,
+    "post_voting_comment_limit_per_post": 10,
+    "post_voting_comment_max_raw_length": 600,
+    "post_voting_enable_likes_on_answers": true,
+    "solved_enabled": true,
+    "solved_allow_multiple_solutions": true,
+    "show_who_marked_solved": false,
+    "allow_solved_on_all_topics": false,
+    "solved_quote_length": 700,
+    "show_filter_by_solved_status": true,
+    "enable_solved_tags": "求解|快问快答",
+    "enable_solved_shared_issues": true,
+    "topic_voting_enabled": true,
+    "topic_voting_enable_vote_limits": true,
+    "topic_voting_show_who_voted": true,
+    "topic_voting_show_votes_on_profile": true
+  },
+  "personalMessagesEnabled": null,
+  "options": [],
+  "controls": "分类\n所有类别\n拥有该标签\n选择…\n仅回访话题/帖子…\n选择…\n话题\n任意\n发帖人\n选择…\n发布时间\n早于\n帖子\n浏览量\n类别专家\n 有专家回应",
+  "sortOrders": [
+    {
+      "id": 0,
+      "term": null,
+      "name": "相关性"
+    },
+    {
+      "id": 1,
+      "term": "order:latest",
+      "name": "最新帖子"
+    },
+    {
+      "id": 2,
+      "term": "order:likes",
+      "name": "赞最多"
+    },
+    {
+      "id": 3,
+      "term": "order:views",
+      "name": "浏览最多"
+    },
+    {
+      "id": 4,
+      "term": "order:latest_topic",
+      "name": "最新话题"
+    },
+    {
+      "id": 5,
+      "term": "order:read",
+      "name": "最近阅读"
+    },
+    {
+      "id": 5,
+      "term": "order:votes",
+      "name": "票数最多"
+    }
+  ],
+  "writes": 0
+}

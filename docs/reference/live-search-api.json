@@ -1,0 +1,87 @@
+{
+  "date": "2026-10-03T05:02:34.835055+00:00",
+  "writes": 0,
+  "checks": [
+    {
+      "status": 200,
+      "retryAfter": null,
+      "verificationRequired": false,
+      "resultCount": 50,
+      "topicCount": 50,
+      "userCount": 0,
+      "hasMore": true,
+      "searchErrorCount": 0,
+      "check": "category:4 tags:纯水 min_posts:1 min_views:0 order:latest_topic"
+    },
+    {
+      "status": 200,
+      "retryAfter": null,
+      "verificationRequired": false,
+      "resultCount": 50,
+      "topicCount": 50,
+      "userCount": 0,
+      "hasMore": true,
+      "searchErrorCount": 0,
+      "check": "tags:纯水+软件开发 order:latest"
+    },
+    {
+      "status": 200,
+      "retryAfter": null,
+      "verificationRequired": false,
+      "resultCount": 50,
+      "topicCount": 50,
+      "userCount": 0,
+      "hasMore": true,
+      "searchErrorCount": 0,
+      "check": "tags:纯水,软件开发 order:views"
+    },
+    {
+      "status": 200,
+      "retryAfter": null,
+      "verificationRequired": false,
+      "resultCount": 50,
+      "topicCount": 47,
+      "userCount": 0,
+      "hasMore": true,
+      "searchErrorCount": 0,
+      "check": "after:2026-10-01 before:2026-10-03 order:likes"
+    },
+    {
+      "status": 200,
+      "retryAfter": null,
+      "verificationRequired": false,
+      "resultCount": 4,
+      "topicCount": 4,
+      "userCount": 0,
+      "hasMore": null,
+      "searchErrorCount": 0,
+      "check": "in:messages order:latest"
+    },
+    {
+      "status": 200,
+      "retryAfter": null,
+      "verificationRequired": false,
+      "resultCount": null,
+      "topicCount": null,
+      "userCount": null,
+      "hasMore": null,
+      "searchErrorCount": 0,
+      "personalMessage": true,
+      "readablePosts": 1,
+      "check": "read-accessible-personal-message"
+    },
+    {
+      "status": 200,
+      "retryAfter": null,
+      "verificationRequired": false,
+      "resultCount": null,
+      "topicCount": null,
+      "userCount": 19,
+      "hasMore": null,
+      "searchErrorCount": 0,
+      "check": "author-autocomplete"
+    }
+  ],
+  "loggedIn": true,
+  "passed": true
+}

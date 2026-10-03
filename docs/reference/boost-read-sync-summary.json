@@ -1,0 +1,48 @@
+{
+  "version": "1.0.2",
+  "date": "2026-10-03",
+  "desktopTests": {
+    "tests": 339,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "actualIde": {
+    "product": "IntelliJ IDEA Ultimate 2026.2.3",
+    "build": "IU-262.10968.63",
+    "checks": 184,
+    "passed": true,
+    "run": "build/host-smoke/565122c6-d005-40aa-9381-65722faea0ce",
+    "boostBodyOffsetDeltaPx": 0,
+    "realForumWrites": 0,
+    "compositionCoverage": "JCEF composition events plus Robot Enter/Esc; physical Windows IME candidate UI not manually verified"
+  },
+  "browsers": {
+    "reader": 42,
+    "layout": 75,
+    "navigation": 16
+  },
+  "pluginVerifier": {
+    "version": "1.410",
+    "target": "IU-262.10968.63",
+    "verdict": "Compatible"
+  },
+  "cleanBuild": {
+    "passed": true,
+    "tests": 339,
+    "directory": "build/release-check/b2ab6b77-e393-47ff-906c-24a3062f9b43",
+    "matchesWorkspaceZip": true,
+    "zipSha256": "e1a31d0b07c59de76beded51a01cd547e49ac86e8ef224a00d542b384554c897",
+    "sourceManifestSha256": "8091fb7916b554b3cf439cdf4129d342589307248484df127c861194261b018b"
+  },
+  "readOnlyForum": {
+    "topic": 482293,
+    "httpStatus": 200,
+    "posts": 20,
+    "boosts": 68,
+    "trackVisit": false,
+    "writes": 0
+  },
+  "restartCoverage": "IDE XML round-trip into fresh queue; real-account full-process restart/upload not performed",
+  "timingIdempotency": "Confirmed successful batches removed; response loss can duplicate server timing on retry"
+}

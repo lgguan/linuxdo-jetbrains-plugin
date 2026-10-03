@@ -1,0 +1,38 @@
+{
+  "version": "1.0.3",
+  "date": "2026-10-03",
+  "bug": "First-open visible reader incorrectly depended on browser input focus",
+  "oldPackageReproduced": {
+    "version": "1.0.2",
+    "selected": true,
+    "visible": true,
+    "ideForeground": true,
+    "documentHasFocus": false,
+    "unreadDotsCleared": false,
+    "timeoutSeconds": 15
+  },
+  "desktopTests": {
+    "tests": 339,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "actualIde": {
+    "build": "IU-262.10968.63",
+    "checks": 58,
+    "passed": true,
+    "productionFileEditorFirstLoad": true,
+    "focusRemainsInToolWindow": true,
+    "unreadFloorsMarkedWithoutTabSwitch": true,
+    "hiddenTabHasNoNewTiming": true,
+    "run": "build/host-smoke/b6942c74-955a-4a1c-b0e6-c4f533fdcba3"
+  },
+  "pluginVerifier": "Compatible",
+  "cleanBuild": {
+    "directory": "build/release-check/d090aeb8-c6ef-4039-acb7-278a01508f1e",
+    "passed": true,
+    "matchesWorkspaceZip": true
+  },
+  "zipSha256": "75cbf3456112e23975e20643a8fab7a051ffb5e997dcd211aa09c90941a55383",
+  "realForumWrites": 0
+}

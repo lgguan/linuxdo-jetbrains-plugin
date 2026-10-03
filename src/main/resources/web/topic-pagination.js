@@ -14,6 +14,7 @@
     const slots = () => Array.from(container.querySelectorAll('.post-entry,.post-placeholder'));
     const cache = new Map();
     let cacheBytes = 0;
+    let patchGeneration = 0, savedOverflowAnchor;
     const MAX_NODES = 200, MAX_CACHE = 400, MAX_BYTES = 32 * 1024 * 1024;
     function remember(el) {
         const id = el.dataset.postId, old = cache.get(id);
@@ -364,7 +365,17 @@
             boundWindow(); window.scrollTo(0,0); update(); return true;
         },
         patch(html) {
-            const anchor = readingAnchor(), top = anchor?.getBoundingClientRect().top;
+            // This code preserves the reading anchor itself. Chromium's automatic
+            // anchoring would otherwise compensate again when controls grow.
+            const generation = ++patchGeneration;
+            if (savedOverflowAnchor === undefined) savedOverflowAnchor = document.documentElement.style.overflowAnchor;
+            document.documentElement.style.overflowAnchor = 'none';
+            // A previously revealed reply can still be on screen below the body
+            // being read. Prefer the first visible body for local mutations.
+            const anchor = entries().find(el => {
+                const rect = el.querySelector('.post-content')?.getBoundingClientRect();
+                return rect && rect.bottom > 0 && rect.top < innerHeight;
+            }) || readingAnchor(), top = anchor?.getBoundingClientRect().top;
             const selection = getSelection();
             const selected = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
             const selectedStart=selected?.startContainer,selectedEnd=selected?.endContainer;
@@ -382,6 +393,10 @@
                 // Keep body nodes and selection when only permissions, counters or controls changed.
                 if (retained.querySelector('.post-content').dataset.source === next.querySelector('.post-content').dataset.source) {
                     retained.querySelector('.floor-actions').replaceWith(next.querySelector('.floor-actions'));
+                    const oldBoosts=retained.querySelector('.boost-container'),newBoosts=next.querySelector('.boost-container');
+                    if(oldBoosts && newBoosts)oldBoosts.replaceWith(newBoosts);
+                    else if(oldBoosts)oldBoosts.remove();
+                    else if(newBoosts)retained.querySelector('.floor-actions').before(newBoosts);
                     retained.dataset.polls = next.dataset.polls; retained.dataset.pollVotes = next.dataset.pollVotes;
                     window.linuxDoPolls?.(retained); remember(retained); return;
                 }
@@ -396,6 +411,11 @@
             });
             if (anchor?.isConnected) window.scrollBy(0,anchor.getBoundingClientRect().top-top);
             window.linuxDoEnhanceContent?.(document); boundWindow();
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                if (generation !== patchGeneration) return;
+                document.documentElement.style.overflowAnchor = savedOverflowAnchor;
+                savedOverflowAnchor = undefined;
+            }));
             if (selected && selectedStart.isConnected && selectedEnd.isConnected) { selection.removeAllRanges(); selection.addRange(selected); }
             else if(preserved){
                 const body=entries().find(el=>el.dataset.postId===preserved.id)?.querySelector('.post-content');

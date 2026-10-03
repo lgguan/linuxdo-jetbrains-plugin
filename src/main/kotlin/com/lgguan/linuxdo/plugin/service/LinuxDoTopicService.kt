@@ -196,12 +196,13 @@ class LinuxDoTopicService : PersistentStateComponent<LinuxDoTopicService.State> 
         filter: Constants.TopicFilter,
         category: Category? = null,
         page: Int = 0,
+        tag: String? = null,
         onSuccess: (List<Topic>, Boolean) -> Unit,
         onError: (Throwable) -> Unit
     ): java.util.concurrent.Future<*> {
         return ApplicationManager.getApplication().executeOnPooledThread {
             com.lgguan.linuxdo.plugin.common.LinuxDoLog.info("Loading topics: filter=$filter, cat=${category?.slug}, page=$page")
-            val result = try { DiscourseApiClient.getTopicList(filter, category?.slug, category?.id, page) }
+            val result = try { DiscourseApiClient.getTopicList(filter, category?.slug, category?.id, page, tag) }
                 catch (error: Exception) { Result.failure(error) }
             result.onSuccess { topicList ->
                 val hasMore = !topicList.moreTopicsUrl.isNullOrBlank()
@@ -249,22 +250,25 @@ class LinuxDoTopicService : PersistentStateComponent<LinuxDoTopicService.State> 
     }
 
     fun loadPopularTags(onComplete: ((List<String>) -> Unit)? = null) {
+        val version = com.lgguan.linuxdo.plugin.net.SessionEpoch.current
         ApplicationManager.getApplication().executeOnPooledThread {
             val result = DiscourseApiClient.getPopularTags()
             result.onSuccess { tags ->
-                val combined = (DEFAULT_SYSTEM_TAGS + tags).distinct()
-                popularTags.clear()
-                popularTags.addAll(combined)
+                if (version != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@onSuccess
+                val combined = tags.distinct()
+                com.lgguan.linuxdo.plugin.net.SessionEpoch.ifCurrent(version) { popularTags.clear(); popularTags.addAll(combined) }
                 try {
                     myState.cachedTags = combined.toMutableList()
                 } catch (t: Throwable) {
                     com.lgguan.linuxdo.plugin.common.LinuxDoLog.warn("Failed to serialize tags cache: ${t.message}")
                 }
                 ApplicationManager.getApplication().invokeLater({
+                    if (version != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
                     onComplete?.invoke(combined)
                 }, com.intellij.openapi.application.ModalityState.any())
             }.onFailure {
                 ApplicationManager.getApplication().invokeLater({
+                    if (version != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
                     onComplete?.invoke(popularTags)
                 }, com.intellij.openapi.application.ModalityState.any())
             }
@@ -272,10 +276,12 @@ class LinuxDoTopicService : PersistentStateComponent<LinuxDoTopicService.State> 
     }
 
     fun searchTags(query: String, onResult: (List<TagItem>) -> Unit) {
+        val version = com.lgguan.linuxdo.plugin.net.SessionEpoch.current
         ApplicationManager.getApplication().executeOnPooledThread {
             val result = DiscourseApiClient.searchTags(query)
             val items = result.getOrElse { emptyList() }
             ApplicationManager.getApplication().invokeLater({
+                if (version != com.lgguan.linuxdo.plugin.net.SessionEpoch.current) return@invokeLater
                 onResult(items)
             }, com.intellij.openapi.application.ModalityState.any())
         }

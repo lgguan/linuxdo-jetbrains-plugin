@@ -21,7 +21,13 @@ object HttpFailure {
                     listOf("cf-chl-opt", "challenge-platform", "Just a moment", "cf-turnstile").any { body.contains(it, true) }))) {
             return CloudflareChallengeException("Cloudflare 人机验证未通过 (HTTP $status)")
         }
-        if (status == 429) return RateLimitException(retryAfter(header("Retry-After")))
+        if (status == 429) {
+            val bodyWait = runCatching {
+                com.google.gson.JsonParser.parseString(body).asJsonObject.getAsJsonObject("extras")?.get("wait_seconds")?.asLong
+            }.getOrNull()?.coerceIn(0,86400)
+            val headerWait = header("Retry-After").takeIf { it.isNotBlank() }?.let { retryAfter(it) }
+            return RateLimitException(listOfNotNull(bodyWait,headerWait).maxOrNull() ?: retryAfter(""))
+        }
         if (status == 403 && listOf("invalid_csrf", "CSRF", "BAD CSRF").any { body.contains(it, true) }) {
             return CsrfRejectedException()
         }

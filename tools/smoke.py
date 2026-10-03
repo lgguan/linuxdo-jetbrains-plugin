@@ -149,7 +149,7 @@ def host(args):
         f"-Didea.log.path={output / 'log'}", f"-Didea.plugins.path={plugins}", f"-Dlinuxdo.host.report={report}",
         "-Didea.trust.all.projects=true", "-Didea.paths.selector=LinuxDoHostSmoke", "-Djb.vmOptionsFile=",
         "-Djava.system.class.loader=com.intellij.util.lang.PathClassLoader", "-cp", cp, launch["mainClass"], command)
-    result = report.read_text()
+    result = report.read_text(encoding="utf-8")
     print(result)
     if "ERROR=" in result or ("IDE_UI_PASS=true" if ui else "SUPPORTED=true") not in result or (args.native and "HOST_NATIVE_PASS=true" not in result):
         raise RuntimeError(f"Host smoke failed: {report}")

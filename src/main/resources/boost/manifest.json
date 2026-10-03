@@ -1,0 +1,27 @@
+[
+  {
+    "file": "aliases.json",
+    "source": "https://raw.githubusercontent.com/discourse/discourse-emojis/main/dist/aliases.json",
+    "sha256": "da6fee5934923cb79212811b6529ac36205244cd064d34aafaf1fdb121b8eba8"
+  },
+  {
+    "file": "emoji_to_name.json",
+    "source": "https://raw.githubusercontent.com/discourse/discourse-emojis/main/dist/emoji_to_name.json",
+    "sha256": "6d55dd468f75e35acd60be6e6770b59eb454d525181528a77e5660c2501b22e4"
+  },
+  {
+    "file": "emojis.json",
+    "source": "https://raw.githubusercontent.com/discourse/discourse-emojis/main/dist/emojis.json",
+    "sha256": "760785d628114cfdf4ad8d3dd746f58b46ecaa5b6057adb3262aee10a0c73a64"
+  },
+  {
+    "file": "tonable_emojis.json",
+    "source": "https://raw.githubusercontent.com/discourse/discourse-emojis/main/dist/tonable_emojis.json",
+    "sha256": "a5562b7c98d6b43d70dbd6a8c6e2154d435135b09f5a4ab649fd18a7e2bb9734"
+  },
+  {
+    "file": "attributions.md",
+    "source": "https://raw.githubusercontent.com/discourse/discourse-emojis/main/attributions.md",
+    "sha256": "1b447d46efb475f7a5fbc628bc87336d9b7b264bd62d11de35f7ddf6430d6053"
+  }
+]

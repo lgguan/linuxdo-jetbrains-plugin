@@ -21,6 +21,8 @@ internal class TopicReaderController(
     private val active: (String, Long) -> Boolean, private val respond: (String, String, JsonObject) -> Unit
 ) {
     private val operations = TopicOperationService()
+    private val boosts = BoostService()
+    private val boostRulesCache = SessionCache<BoostEmojiRules>()
     private val rulesCache = SessionCache<ReaderRules>()
     private val uncertain = java.util.concurrent.ConcurrentHashMap.newKeySet<Triple<String,Long,Long>>()
     @Volatile private var filterState: Triple<String,String,Boolean>? = null
@@ -33,6 +35,15 @@ internal class TopicReaderController(
     fun handle(key: String, requestId: String, action: String, postId: Long, input: JsonObject, version: Long) {
         if (!active(key,version) || requestId.length !in 1..64 || input.toString().length > 200000) return
         val current = topic() ?: return
+        if (action == "retryReadSync") {
+            if (!LinuxDoSettingsState.getInstance().autoReportReadTimings) {
+                respond(key,requestId,json("message" to "自动同步已关闭；待同步数据已保留，请在设置中开启后补传"))
+                return
+            }
+            LinuxDoReadTrackingService.getInstance().retrySync()
+            respond(key,requestId,json("message" to "已恢复补传；论坛冷却结束后继续"))
+            return
+        }
         val loaded = current.postStream.posts.firstOrNull { it.id == postId }
         if (postId != 0L && loaded == null) { respond(key,requestId,json("error" to "该楼层已从缓存移出，请重新定位后操作")); return }
         if (action == "appearance") {
@@ -65,6 +76,19 @@ internal class TopicReaderController(
             var filtering: Pair<String,Boolean>? = null
             val result = runCatching {
                 when(action) {
+                    "boostInfo" -> {
+                        val post = ForumOperationTransport.post(postId,version).getOrThrow();require(post.topicId==current.id);changed=post
+                        val rules = boostRulesCache.get() ?: BoostEmojiRules.parse(DiscourseApiClient.readerBootstrap(version).getOrThrow()).also { boostRulesCache.put(version,it) }
+                        json("allowed" to (post.canBoost==true),"emojiNames" to (BoostText.names+rules.custom),"emojiUnicode" to BoostText.unicode,"tonedEmoji" to BoostText.toned,"deniedEmoji" to rules.denied)
+                    }
+                    "boostSend", "boostDelete" -> {
+                        val rules = if(action=="boostSend") boostRulesCache.get() ?: BoostEmojiRules.parse(DiscourseApiClient.readerBootstrap(version).getOrThrow()).also { boostRulesCache.put(version,it) } else BoostEmojiRules()
+                        val operation = boosts.perform(current.id,postId,input.get("raw")?.asString,
+                            if(action=="boostDelete")input.get("boostId").asLong else null,version,rules) { active(key,version) }
+                        changed = operation.post
+                        operation.error?.let { throw it }
+                        json("message" to if(action=="boostDelete")"Boost 已撤回" else "Boost 已发送")
+                    }
                     "search" -> TopicReadingService.search(current.id,input.get("query").asString,input.get("page").asInt,version).getOrThrow()
                     "profile" -> TopicReadingService.profile(input.get("username").asString,version).getOrThrow()
                     "context" -> {

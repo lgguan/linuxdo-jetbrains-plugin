@@ -15,8 +15,8 @@ internal interface TopicOperationTransport {
 internal object ForumOperationTransport : TopicOperationTransport {
     override fun post(id: Long, version: Long): Result<Post> = runCatching {
         val post = Gson().fromJson(DiscourseApiClient.readerGet("/posts/$id.json", version).getOrThrow(), Post::class.java)
-        if (post.postVotingVoteCount == null) post else {
-            // Voting direction is serialized only inside a TopicView, including the posts endpoint.
+        if (post.topicId == null) post else {
+            // Boost permissions, Boost lists and voting direction require a TopicView.
             val stream = DiscourseApiClient.readerGet("/t/${post.topicId}/posts.json?post_ids[]=$id", version).getOrThrow()
                 .asJsonObject.getAsJsonObject("post_stream")
             val current = stream?.getAsJsonArray("posts")?.firstOrNull()?.let { Gson().fromJson(it, Post::class.java) }

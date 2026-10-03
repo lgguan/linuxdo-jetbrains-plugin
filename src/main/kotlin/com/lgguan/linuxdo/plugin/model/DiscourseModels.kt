@@ -125,6 +125,7 @@ data class Post(
     @SerializedName("topic_slug") val topicSlug: String? = null,
     @SerializedName("actions_summary") val actionsSummary: List<ActionSummary>? = null,
     @SerializedName("boosts") val boosts: List<PostBoost>? = null,
+    @SerializedName("can_boost") val canBoost: Boolean? = null,
     @SerializedName("yours") val yours: Boolean? = null,
     @SerializedName("can_edit") val canEdit: Boolean? = null,
     @SerializedName("can_delete") val canDelete: Boolean? = null,
@@ -177,6 +178,7 @@ data class PostBoost(
     @SerializedName("raw") val raw: String? = null,
     @SerializedName("cooked") val cooked: String? = null,
     @SerializedName("content") val content: String? = null,
+    @SerializedName("can_delete") val canDelete: Boolean? = null,
     @SerializedName("user") val user: BoostUser? = null
 ) {
     fun getDisplayUsername(): String {
@@ -343,8 +345,12 @@ data class UploadResponse(
 )
 
 data class TagListResponse(
-    @SerializedName("tags") val tags: List<TagItem> = emptyList()
+    @SerializedName("tags") val tags: List<TagItem> = emptyList(),
+    @SerializedName("extras") val extras: TagExtras? = null
 )
+
+data class TagExtras(@SerializedName("tag_groups") val groups: List<BrowseTagGroup> = emptyList())
+data class BrowseTagGroup(val id: Int = 0, val name: String = "", val tags: List<TagItem> = emptyList())
 
 data class TagItem(
     @SerializedName("id") val id: String,

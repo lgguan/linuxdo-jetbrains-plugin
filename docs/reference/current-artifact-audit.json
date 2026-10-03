@@ -1,0 +1,123 @@
+{
+  "packageExists": true,
+  "packageHashMatchesSummary": true,
+  "cleanSourceCodeMatchesCurrent": true,
+  "unitTests": {
+    "tests": 321,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "ide162ChecksPass": true,
+  "currentIdeJarEqualsZip": [
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/autolink-0.12.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/commonmark-0.30.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/commonmark-ext-autolink-0.30.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/commonmark-ext-gfm-strikethrough-0.30.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/commonmark-ext-gfm-tables-0.30.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/commonmark-ext-task-list-items-0.30.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/error_prone_annotations-2.27.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/gson-2.11.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/instrumented-linuxdo-jetbrains-plugin-1.0.1.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/jsoup-1.18.3.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/okhttp-4.12.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/okhttp-dnsoverhttps-4.12.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/okio-jvm-3.6.0.jar",
+      "matches": true
+    }
+  ],
+  "liveDraftIdeJarEqualsZip": [
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/autolink-0.12.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/commonmark-0.30.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/commonmark-ext-autolink-0.30.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/commonmark-ext-gfm-strikethrough-0.30.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/commonmark-ext-gfm-tables-0.30.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/commonmark-ext-task-list-items-0.30.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/error_prone_annotations-2.27.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/gson-2.11.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/instrumented-linuxdo-jetbrains-plugin-1.0.1.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/jsoup-1.18.3.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/okhttp-4.12.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/okhttp-dnsoverhttps-4.12.0.jar",
+      "matches": true
+    },
+    {
+      "jar": "linuxdo-jetbrains-plugin/lib/okio-jvm-3.6.0.jar",
+      "matches": true
+    }
+  ],
+  "zipSha256": "87b3034453ba9ebccea736ec7a115af2f234047308336da3d2d932b801b16c3e",
+  "liveDraftPass": true,
+  "liveSearchReadPass": true
+}

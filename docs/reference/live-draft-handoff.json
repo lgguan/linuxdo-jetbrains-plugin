@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "topicId": 482293,
+  "postSubmitted": false,
+  "checks": [
+    "ide_autosaves_real_draft",
+    "web_restores_ide_body",
+    "web_saves_body_for_ide",
+    "owned_test_draft_cleared"
+  ]
+}
