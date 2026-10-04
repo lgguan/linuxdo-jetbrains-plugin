@@ -32,5 +32,25 @@
   "combinedNativeRun": "Focus timeout between test windows; each suite rerun separately",
   "githubRelease": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/tag/v1.0.3",
   "marketplaceId": 34669,
-  "restartRequired": true
+  "restartRequired": true,
+  "sourceCommit": "d1b9dc2ab6928a5e36cac9b777a327599b7f5858",
+  "githubPublished": true,
+  "githubAttachmentsMatchLocal": true,
+  "ci": {
+    "url": "https://github.com/lgguan/linuxdo-jetbrains-plugin/actions/runs/37201805786",
+    "conclusion": "success"
+  },
+  "ciBuildPlatforms": [
+    "Windows",
+    "macOS",
+    "Linux"
+  ],
+  "marketplace": {
+    "updateId": 1187229,
+    "channel": "Stable",
+    "status": "Approved",
+    "contentsMatchLocal": true,
+    "logicalEntries": 1864,
+    "previousVersionRetained": true
+  }
 }

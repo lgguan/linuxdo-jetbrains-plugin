@@ -44,8 +44,12 @@
     "macOS and Linux native UI were not tested",
     "Moderator Boost deletion and immediate moderation actions are outside this change"
   ],
-  "published": false,
+  "published": true,
   "restartRequired": true,
   "avatarOnlyProfileEntry": true,
-  "pluginVerifierRevision": "own trash action and expansion without permissions requests"
+  "pluginVerifierRevision": "own trash action and expansion without permissions requests",
+  "githubPublished": true,
+  "marketplaceUploaded": true,
+  "marketplaceStatus": "Approved",
+  "githubRelease": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/tag/v1.0.3"
 }

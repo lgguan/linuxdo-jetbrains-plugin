@@ -1,0 +1,46 @@
+{
+  "release": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/tag/v1.0.3",
+  "tag": "v1.0.3",
+  "commit": "d1b9dc2ab6928a5e36cac9b777a327599b7f5858",
+  "publishedAt": "2026-10-04T12:30:47Z",
+  "assets": [
+    {
+      "name": "linuxdo-jetbrains-plugin-1.0.3-source.zip",
+      "size": 6963643,
+      "sha256": "ed706a8219b13eb0f3203f42fbc8cfb5c292b57ea16aa1d6f9e510cc7756c6e3",
+      "url": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/download/v1.0.3/linuxdo-jetbrains-plugin-1.0.3-source.zip",
+      "matchesLocal": true,
+      "verificationMethod": "GitHub server SHA-256 digest and file size",
+      "downloadMatchesLocal": true
+    },
+    {
+      "name": "linuxdo-jetbrains-plugin-1.0.3-source.zip.sha256",
+      "size": 109,
+      "sha256": "3fd1a073d5108edf4c91bfd439384b4d461617148e3689a0d9a7b8c7c0e31996",
+      "url": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/download/v1.0.3/linuxdo-jetbrains-plugin-1.0.3-source.zip.sha256",
+      "matchesLocal": true,
+      "verificationMethod": "GitHub server SHA-256 digest and file size"
+    },
+    {
+      "name": "linuxdo-jetbrains-plugin-1.0.3.zip",
+      "size": 5597305,
+      "sha256": "37ffeba74a250bfb773eb2ccaf18d3ec5c6a7cc55c03004a0c2e57d20a0af35e",
+      "url": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/download/v1.0.3/linuxdo-jetbrains-plugin-1.0.3.zip",
+      "matchesLocal": true,
+      "verificationMethod": "GitHub server SHA-256 digest and file size"
+    },
+    {
+      "name": "linuxdo-jetbrains-plugin-1.0.3.zip.sha256",
+      "size": 102,
+      "sha256": "18e89fcc7de971f49ad219ae0d7b4910264991efba9789d493a45697b111d4e5",
+      "url": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/download/v1.0.3/linuxdo-jetbrains-plugin-1.0.3.zip.sha256",
+      "matchesLocal": true,
+      "verificationMethod": "GitHub server SHA-256 digest and file size"
+    }
+  ],
+  "latestReleaseConfirmed": true,
+  "ci": {
+    "url": "https://github.com/lgguan/linuxdo-jetbrains-plugin/actions/runs/37201805786",
+    "conclusion": "success"
+  }
+}

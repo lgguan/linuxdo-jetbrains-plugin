@@ -1,0 +1,11 @@
+{
+  "version": "1.0.3",
+  "page": "https://plugins.jetbrains.com/plugin/34669-linux-do-api-docs-/edit/versions/stable/1187229",
+  "download": "https://plugins.jetbrains.com/plugin/download?rel=true&updateId=1187229",
+  "status": "Approved",
+  "localSha256": "37ffeba74a250bfb773eb2ccaf18d3ec5c6a7cc55c03004a0c2e57d20a0af35e",
+  "downloadSha256": "d49718b1eb74a0bf35c86436b1e22705e358ce527f74c3f71c6d9fb7e5f6843d",
+  "logicalEntries": 1864,
+  "contentsMatch": true,
+  "previousVersionRetained": true
+}
