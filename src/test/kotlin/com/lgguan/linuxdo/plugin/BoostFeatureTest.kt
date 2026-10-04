@@ -100,7 +100,24 @@ class BoostFeatureTest {
         assertTrue(doc.select("script,iframe,[onerror]").isEmpty());assertEquals(1,doc.select(".boost-content img.emoji").size)
         assertEquals(1,doc.select(".boost-container [data-boost-open]").size);assertTrue(doc.select(".floor-actions [data-boost-open]").isEmpty())
         assertEquals(1,doc.select("[data-boost-delete]").size);assertEquals(1,doc.select(".boost-user[data-reader-author=reader]").size)
+        assertTrue(doc.select("[data-boost-flag]").isEmpty())
+        assertEquals(1,doc.select("[data-boost-delete] svg.reader-icon").size)
+        assertFalse(doc.select("[data-boost-delete]").text().contains("×"))
+        assertTrue(doc.select(".boost-bubble-actions [data-reader-author]").isEmpty())
         val unknown=Jsoup.parse(TopicDocumentRenderer.buildPostFragment(topic,listOf(post.copy(canBoost=null)),LinuxDoSettingsState(),"reader"))
         assertTrue(unknown.select("[data-boost-open]").isEmpty())
+    }
+    @Test fun `other Boost actions expose existing server flag permissions`() {
+        val topic=TopicDetailResponse(1,"Test",postStream=PostStream(listOf(post)))
+        for((boost,permission) in listOf(
+            mine.copy(user=BoostUser(id=8,username="other"),canFlag=true,availableFlags=listOf("spam")) to "true",
+            mine.copy(user=BoostUser(id=8,username="other"),canFlag=false) to "false",
+            mine.copy(user=BoostUser(id=8,username="other"),canFlag=true,availableFlags=listOf("spam"),userFlagStatus=0) to "false",
+            mine.copy(user=BoostUser(id=8,username="other"),canFlag=null) to "unknown"
+        )) {
+            val doc=Jsoup.parse(TopicDocumentRenderer.buildPostFragment(topic,listOf(post.copy(boosts=listOf(boost))),LinuxDoSettingsState(),"reader"))
+            assertTrue(doc.select("[data-boost-delete]").isEmpty())
+            assertEquals(permission,doc.selectFirst("[data-boost-flag]")!!.attr("data-boost-can-flag"))
+        }
     }
 }

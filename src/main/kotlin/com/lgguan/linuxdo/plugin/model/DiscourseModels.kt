@@ -180,7 +180,10 @@ data class PostBoost(
     @SerializedName("cooked") val cooked: String? = null,
     @SerializedName("content") val content: String? = null,
     @SerializedName("can_delete") val canDelete: Boolean? = null,
-    @SerializedName("user") val user: BoostUser? = null
+    @SerializedName("user") val user: BoostUser? = null,
+    @SerializedName("can_flag") val canFlag: Boolean? = null,
+    @SerializedName("available_flags") val availableFlags: List<String>? = null,
+    @SerializedName("user_flag_status") val userFlagStatus: Int? = null
 ) {
     fun getDisplayUsername(): String {
         return user?.username ?: username ?: "user"

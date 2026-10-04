@@ -1299,7 +1299,7 @@ public class IdeUiSmoke implements ApplicationStarter {
     JsonObject item(int id){return JsonParser.parseString("{\"id\":"+id+",\"notification_type\":2,\"read\":false,\"topic_id\":999997,\"post_number\":2,\"data\":{\"topic_title\":\"通知验收\",\"display_username\":\"fixture\"}}").getAsJsonObject();}
     public okhttp3.Response intercept(okhttp3.Interceptor.Chain chain)throws IOException{
       okhttp3.Request request=chain.request();String path=request.url().encodedPath(),body="{}";int code=200;
-      if(path.equals("/site.json"))body="{\"notification_types\":{\"boost\":43,\"assigned\":34}}";
+      if(path.equals("/site.json"))body="{\"notification_types\":{\"boost\":43,\"assigned\":34},\"post_action_types\":[{\"id\":6,\"name_key\":\"notify_moderators\",\"name\":\"其他\",\"description\":\"请向版主说明这条 Boost 的问题\",\"enabled\":true,\"is_flag\":true,\"require_message\":true,\"applies_to\":[\"DiscourseBoosts::Boost\"]}]}";
       else if(path.equals("/notifications.json")){
         if(failPage)code=503;
         else {
@@ -1405,6 +1405,10 @@ public class IdeUiSmoke implements ApplicationStarter {
       posts.add(post); ids.add(floor);
     }
     JsonObject stream = new JsonObject(); stream.add("posts", posts); stream.add("stream", ids); topic.add("post_stream", stream);
+    JsonObject otherBoost=JsonParser.parseString("{\"id\":5001,\"cooked\":\"<p>示例 Boost</p>\",\"user\":{\"id\":999991,\"username\":\"fixture_booster\"}}").getAsJsonObject();
+    otherBoost.getAsJsonObject("user").addProperty("avatar_template","/user_avatar/linux.do/fixture_booster/{size}/fixture.png");
+    otherBoost.addProperty("can_flag",true);otherBoost.add("available_flags",JsonParser.parseString("[\"notify_moderators\"]"));
+    JsonArray otherBoosts=new JsonArray();otherBoosts.add(otherBoost);posts.get(2).getAsJsonObject().add("boosts",otherBoosts);
     TopicDetailResponse detail = GSON.fromJson(topic, TopicDetailResponse.class);
     JsonObject firstOpenTopic=topic.deepCopy();firstOpenTopic.addProperty("id",999997);firstOpenTopic.addProperty("title","首次打开已读验收");firstOpenTopic.addProperty("highest_post_number",2);firstOpenTopic.addProperty("last_read_post_number",0);
     JsonArray firstOpenPosts=new JsonArray();
@@ -1430,6 +1434,8 @@ public class IdeUiSmoke implements ApplicationStarter {
     java.util.concurrent.atomic.AtomicInteger boostSends=new java.util.concurrent.atomic.AtomicInteger(),boostDeletes=new java.util.concurrent.atomic.AtomicInteger();
     java.util.concurrent.atomic.AtomicBoolean rejectBoost=new java.util.concurrent.atomic.AtomicBoolean(false);
     java.util.concurrent.atomic.AtomicReference<JsonObject> boostPayload=new java.util.concurrent.atomic.AtomicReference<>();
+    java.util.concurrent.atomic.AtomicInteger boostFlags=new java.util.concurrent.atomic.AtomicInteger();
+    java.util.concurrent.atomic.AtomicInteger boostActionReads=new java.util.concurrent.atomic.AtomicInteger();
     settings.setNetworkMode("JAVA_ONLY");
     NotificationFixture notificationFixture=new NotificationFixture();
     clientField.set(null,previousClient.newBuilder().cookieJar(readerCredentials).addInterceptor(notificationFixture).addInterceptor(chain->{
@@ -1437,6 +1443,21 @@ public class IdeUiSmoke implements ApplicationStarter {
       if(request.method().equals("GET")&&(path.equals("/session/csrf")||path.equals("/session/csrf.json")))response="{\"csrf\":\"reader-fixture-csrf\"}";
       else if(request.method().equals("GET")&&path.equals("/t/999997.json"))response=firstOpenTopic.toString();
       else if(request.method().equals("GET")&&path.equals("/latest"))response="<script id='data-preloaded' type='application/json'>{\"siteSettings\":{\"emoji_deny_list\":\"\"},\"customEmoji\":[]}</script>";
+      else if(request.method().equals("GET")&&path.equals("/discourse-boosts/boosts/5001")) {
+        boostActionReads.incrementAndGet();
+        try { Thread.sleep(1200); } catch(InterruptedException interrupted) { Thread.currentThread().interrupt();throw new IOException(interrupted); }
+        JsonObject boost=otherBoost.deepCopy();boost.addProperty("can_flag",boostFlags.get()==0);boost.addProperty("can_delete",false);
+        boost.add("available_flags",JsonParser.parseString("[\"notify_moderators\"]"));if(boostFlags.get()>0)boost.addProperty("user_flag_status",0);response=boost.toString();
+      }
+      else if(request.method().equals("GET")&&path.equals("/discourse-boosts/boosts/4001")) {
+        JsonObject boost=posts.get(1).getAsJsonObject().getAsJsonArray("boosts").get(0).getAsJsonObject().deepCopy();boost.addProperty("can_flag",false);response=boost.toString();
+      }
+      else if(request.method().equals("GET")&&path.equals("/u/fixture_booster/card.json"))response="{\"user\":{\"username\":\"fixture_booster\",\"name\":\"示例用户\",\"title\":\"论坛成员\",\"trust_level\":2,\"bio_cooked\":\"<p>公开资料简介</p>\",\"created_at\":\"2025-01-01T00:00:00Z\"}}";
+      else if(request.method().equals("POST")&&path.equals("/discourse-boosts/boosts/5001/flags")) {
+        okio.Buffer body=new okio.Buffer();request.body().writeTo(body);JsonObject data=JsonParser.parseString(body.readUtf8()).getAsJsonObject();
+        if(data.get("flag_type_id").getAsInt()!=6||!data.get("message").getAsString().equals("模拟举报说明")||data.get("take_action").getAsBoolean()||data.get("queue_for_review").getAsBoolean())throw new IOException("invalid Boost flag fixture payload");
+        boostFlags.incrementAndGet();response="{\"success\":\"OK\"}";
+      }
       else if(request.method().equals("GET")&&path.matches("/posts/\\d+\\.json")) {
         int floor=Integer.parseInt(path.substring(7,path.length()-5));response=posts.get(floor-1).toString();
       }
@@ -1521,6 +1542,7 @@ public class IdeUiSmoke implements ApplicationStarter {
       await("reading width restored",()->evaluate(browser,themeQuery,replies,"({ok:linuxDoPage.width==="+originalWidth+"})").get("ok").getAsBoolean());
       evaluate(browser,query,replies,"(()=>{getSelection().removeAllRanges();document.querySelector('#floor-1 details').open=false;return {ok:true}})()");
       boostReaderAcceptance(panel,browser,query,replies,frame,boostSends,boostDeletes,rejectBoost,boostPayload);
+      boostActionsAcceptance(browser,query,replies,frame,boostFlags,boostActionReads);
       check("IDE_CROSS_TOPIC_QUOTE_SHOWS_CONTEXT",evaluate(browser,query,replies,"(()=>{var original=window.intellijBridge.readerAction;var target=0;window.intellijBridge.readerAction=function(key,id,action,postId,input){target=input.topic;linuxDoReaderResult(key,id,{items:[{floor:5,author:'sample',text:'公开引用上下文'}]})};document.querySelector('aside[data-topic=\"2909396\"] .quote-controls').click();window.intellijBridge.readerAction=original;return {ok:target===2909396 && !!document.querySelector('.topic-reader-panel')}})()").get("ok").getAsBoolean());
       evaluate(browser, query, replies, "(()=>{document.querySelector('.topic-reader-panel button').click();linuxDoPagination.jump(8);return {ok:true}})()");
       await("IDE receives successful jump origin", () -> ((Map<?,?>)field(panel, "returnFloors")).containsKey(999999L));
@@ -1547,7 +1569,8 @@ public class IdeUiSmoke implements ApplicationStarter {
       }
       JsonObject shortStream=new JsonObject();shortStream.add("posts",shortPosts);shortStream.add("stream",JsonParser.parseString("[1,2]"));compact.add("post_stream",shortStream);
       TopicDetailResponse ordinary=GSON.fromJson(compact,TopicDetailResponse.class);
-      edt(() -> {frame.setSize(960,700);Field f=DocViewerPanel.class.getDeclaredField("currentTopic");f.setAccessible(true);f.set(panel,ordinary);invoke(panel,"renderTopic",new Class<?>[]{TopicDetailResponse.class,Integer.class},ordinary,1);return null;});
+      // The ordinary layout fixture starts without the previous fixture's jump history.
+      edt(() -> {frame.setSize(960,700);((Map<?,?>)field(panel,"returnFloors")).clear();Field f=DocViewerPanel.class.getDeclaredField("currentTopic");f.setAccessible(true);f.set(panel,ordinary);invoke(panel,"renderTopic",new Class<?>[]{TopicDetailResponse.class,Integer.class},ordinary,1);return null;});
       Thread.sleep(1200);
       check("IDE_ORDINARY_POSTS_HAVE_ONLY_AVAILABLE_ACTIONS",evaluate(browser,query,replies,"({ok:document.querySelectorAll('.post-entry').length===2 && !document.querySelector('[data-reader-action=edit],[data-reader-action=history],[data-reader-action=delete],.action-disabled') && document.querySelector('.topic-return-button').hidden && document.querySelector('#floor-1 .floor-actions').getBoundingClientRect().top>=document.querySelector('#floor-1 .post-content').getBoundingClientRect().bottom})").get("ok").getAsBoolean());
       check("IDE_READER_FOCUS_TARGET_IS_BROWSER",edt(()->panel.preferredFocusedComponent()==browser.getComponent()));
@@ -1680,11 +1703,13 @@ public class IdeUiSmoke implements ApplicationStarter {
     check("IDE_BOOST_LOCAL_PATCH_PRESERVES_BODY_AND_POSITION",patchCheck.get("same").getAsBoolean()&&patchCheck.get("delta").getAsDouble()<3&&!patchCheck.get("hasEntry").getAsBoolean());
     evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 .boost-bubble').scrollIntoView({block:'center'});return {ok:true}})()");Thread.sleep(250);
     check("IDE_BOOST_BUBBLE_VISIBLE",evaluate(browser,query,replies,"(()=>{const r=document.querySelector('#floor-2 .boost-bubble').getBoundingClientRect();return {ok:r.top>=0&&r.bottom<document.querySelector('.topic-navigation').getBoundingClientRect().top}})()").get("ok").getAsBoolean());
+    clickReaderElement(browser,query,replies,"#floor-2 .boost-expand");
+    check("IDE_OWN_BOOST_HAS_ONLY_TRASH_ACTION",evaluate(browser,query,replies,"({ok:!document.querySelector('#floor-2 [data-boost-flag]')&&document.querySelectorAll('#floor-2 .boost-bubble-actions button').length===1&&!!document.querySelector('#floor-2 [data-boost-delete] svg.reader-icon')&&!document.querySelector('#floor-2 [data-boost-delete]').textContent.includes('×')&&!document.querySelector('#floor-2 .boost-bubble-actions').hidden})").get("ok").getAsBoolean());
     showcaseCapture(frame,"boost-bubble-own");
     evaluate(browser,query,replies,"(()=>{const list=document.querySelector('#floor-2 .boost-container');window.boostOriginalList=list.innerHTML;list.style.display='block';for(let n=0;n<80;n++){const row=document.createElement('div');row.className='boost-bubble';row.textContent='示例微回复列表 '+n;row.style.display='block';row.style.height='32px';list.append(row);}list.children[30].scrollIntoView({block:'center'});return {ok:true}})()");Thread.sleep(250);
     check("IDE_BOOST_AREA_IS_NOT_BODY_READING",evaluate(browser,query,replies,"(()=>{let sample;const original=intellijBridge.readingSample;intellijBridge.readingSample=(floors,scroll,bodyVisible)=>sample={floors,bodyVisible};sampleDocReading();intellijBridge.readingSample=original;return {ok:sample&&!sample.bodyVisible&&sample.floors.length===0}})()").get("ok").getAsBoolean());
     evaluate(browser,query,replies,"(()=>{const list=document.querySelector('#floor-2 .boost-container');list.innerHTML=boostOriginalList;list.style.removeProperty('display');list.querySelector('[data-boost-delete]').scrollIntoView({block:'center'});return {ok:true}})()");Thread.sleep(250);
-    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-2 [data-boost-delete]').click();return {ok:true}})()");
+    clickReaderElement(browser,query,replies,"#floor-2 [data-boost-delete] svg");
     await("withdraw restores permitted entrance",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('#floor-2 [data-boost-open]')&&!document.querySelector('#floor-2 .boost-bubble')})").get("ok").getAsBoolean());
     check("IDE_BOOST_OWN_DELETE_RELOADS_CAPABILITY",deletes.get()==1&&sends.get()==initial+2);
     edt(()->{frame.setSize(400,700);return null;});Thread.sleep(500);
@@ -1720,6 +1745,48 @@ public class IdeUiSmoke implements ApplicationStarter {
     showcaseCapture(frame,"read-sync-pending");
     evaluate(browser,query,replies,"(()=>{linuxDoSyncStatus(null);return {ok:document.querySelector('.read-sync-badge').hidden}})()");
     edt(()->{frame.setSize(960,700);return null;});Thread.sleep(300);
+  }
+  private static void boostActionsAcceptance(LinuxDoBrowser browser,LinuxDoJSQuery query,BlockingQueue<String> replies,JFrame frame,java.util.concurrent.atomic.AtomicInteger flags,java.util.concurrent.atomic.AtomicInteger reads)throws Exception {
+    int initialReads=reads.get();
+    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-3 .boost-expand').scrollIntoView({block:'center'});window.boostReportBody=document.querySelector('#floor-3 .post-content');window.boostAvatarBefore=document.querySelector('#floor-3 img.boost-avatar');return {ok:true}})()");
+    clickReaderElement(browser,query,replies,"#floor-3 .boost-expand");
+    check("IDE_BOOST_REPORT_IMMEDIATELY_CLICKABLE_WITHOUT_PERMISSION_REQUEST",reads.get()==initialReads&&evaluate(browser,query,replies,"({ok:!!document.querySelector('#floor-3 .boost-flag:not([hidden]):not(:disabled)')&&document.querySelector('#floor-3 .boost-expand').getAttribute('aria-expanded')==='true'})").get("ok").getAsBoolean());
+    await("Boost permissions expanded",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('#floor-3 .boost-flag:not([hidden]):not(:disabled)')})").get("ok").getAsBoolean());
+    check("IDE_BOOST_PERMISSIONS_PRESERVE_EXISTING_AVATAR_AND_BODY",evaluate(browser,query,replies,"({ok:document.querySelector('#floor-3 img.boost-avatar')===boostAvatarBefore&&document.querySelector('#floor-3 .post-content')===boostReportBody})").get("ok").getAsBoolean());
+    check("IDE_BOOST_ACTIONS_USE_LOADED_SERVER_PERMISSIONS",evaluate(browser,query,replies,"({ok:document.querySelector('#floor-3 .boost-expand').getAttribute('aria-expanded')==='true'&&!document.querySelector('#floor-3 [data-boost-delete]')})").get("ok").getAsBoolean());
+    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-3 .boost-avatar').src='data:image/svg+xml,%3Csvg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\"%3E%3Crect width=\"24\" height=\"24\" fill=\"%2379a\"/%3E%3C/svg%3E';return {ok:true}})()");
+    clickReaderElement(browser,query,replies,"#floor-3 img.boost-avatar");
+    await("Boost public user card",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('.reader-user-card')?.textContent.includes('fixture_booster')})").get("ok").getAsBoolean());
+    check("IDE_BOOST_AVATAR_IMAGE_MOUSE_CLICK_OPENS_CARD_WITHOUT_LIGHTBOX",evaluate(browser,query,replies,"({ok:!document.querySelector('#img-lightbox-overlay.active')&&!!document.querySelector('.reader-user-card')})").get("ok").getAsBoolean());
+    check("IDE_BOOST_USER_CARD_HAS_PUBLIC_INFO_AND_WEB_ENTRY",evaluate(browser,query,replies,"({ok:document.querySelector('.topic-reader-panel').textContent.includes('公开资料简介')&&[...document.querySelectorAll('.topic-reader-panel button')].some(b=>b.textContent==='在网页查看完整资料')})").get("ok").getAsBoolean());
+    showcaseCapture(frame,"boost-user-card");
+    evaluate(browser,query,replies,"(()=>{[...document.querySelectorAll('.topic-reader-panel button')].find(b=>b.textContent==='关闭').click();document.querySelector('#floor-3 .boost-expand').click();return {ok:true}})()");
+    await("Boost report action available",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('#floor-3 .boost-flag:not([hidden]):not(:disabled)')})").get("ok").getAsBoolean());
+    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-3 .boost-flag').click();return {ok:true}})()");
+    await("Boost report form",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('[aria-label=\"Boost 举报说明\"]')})").get("ok").getAsBoolean());
+    check("IDE_BOOST_FORM_FETCHES_TARGET_PERMISSIONS_ONCE",reads.get()==initialReads+1);
+    check("IDE_BOOST_REPORT_REQUIRES_MESSAGE",evaluate(browser,query,replies,"({ok:[...document.querySelectorAll('.topic-reader-panel button')].find(b=>b.textContent==='确认举报 Boost').disabled})").get("ok").getAsBoolean());
+    evaluate(browser,query,replies,"(()=>{const m=document.querySelector('[aria-label=\"Boost 举报说明\"]');m.value='模拟举报说明';m.dispatchEvent(new Event('input'));return {ok:true}})()");
+    showcaseCapture(frame,"boost-report-form");
+    // Trigger the production native confirmation without blocking the probe on its modal EDT loop.
+    browser.getCefBrowser().executeJavaScript("[...document.querySelectorAll('.topic-reader-panel button')].find(b=>b.textContent==='确认举报 Boost').click();",browser.getCefBrowser().getURL(),0);
+    choose("No");
+    await("Boost cancelled input retained",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('.topic-reader-panel')?.textContent.includes('已取消')})").get("ok").getAsBoolean());
+    check("IDE_BOOST_REPORT_CANCEL_RETAINS_MESSAGE_WITHOUT_WRITE",flags.get()==0&&evaluate(browser,query,replies,"({ok:document.querySelector('[aria-label=\"Boost 举报说明\"]').value==='模拟举报说明'})").get("ok").getAsBoolean());
+    browser.getCefBrowser().executeJavaScript("[...document.querySelectorAll('.topic-reader-panel button')].find(b=>b.textContent==='确认举报 Boost').click();",browser.getCefBrowser().getURL(),0);
+    choose("Yes");
+    await("Boost report confirmed",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('.topic-reader-panel')?.textContent.includes('Boost 举报已提交')})").get("ok").getAsBoolean());
+    check("IDE_BOOST_REPORT_SUBMITS_ONCE_TO_BOOST_ENDPOINT",flags.get()==1&&evaluate(browser,query,replies,"({ok:[...document.querySelectorAll('.topic-reader-panel button')].find(b=>b.textContent==='确认举报 Boost').disabled})").get("ok").getAsBoolean());
+    check("IDE_BOOST_REPORT_PRESERVES_BODY_NODE",evaluate(browser,query,replies,"({ok:document.querySelector('#floor-3 .post-content')===boostReportBody})").get("ok").getAsBoolean());
+    evaluate(browser,query,replies,"(()=>{[...document.querySelectorAll('.topic-reader-panel button')].find(b=>b.textContent==='关闭').click();document.querySelector('#floor-3 .boost-expand').click();return {ok:true}})()");
+    await("reported Boost disabled",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('#floor-3 .boost-flag:not([hidden]):disabled:not([aria-busy=true])')})").get("ok").getAsBoolean());
+    check("IDE_BOOST_ALREADY_REPORTED_IS_DISABLED",flags.get()==1);
+  }
+  private static void clickReaderElement(LinuxDoBrowser browser,LinuxDoJSQuery query,BlockingQueue<String> replies,String selector)throws Exception {
+    JsonObject bounds=evaluate(browser,query,replies,"(()=>{const el=document.querySelector("+GSON.toJson(selector)+");el.scrollIntoView({block:'center'});const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,ok:r.width>0&&r.height>0}})()");
+    if(!bounds.get("ok").getAsBoolean())throw new IllegalStateException("Invisible reader target: "+selector);
+    Point origin=edt(()->browser.getComponent().getLocationOnScreen());
+    Robot mouse=new Robot();mouse.mouseMove(origin.x+(int)Math.round(bounds.get("x").getAsDouble()),origin.y+(int)Math.round(bounds.get("y").getAsDouble()));mouse.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);mouse.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);mouse.waitForIdle();
   }
   private static void firstOpenReadAcceptance() throws Exception {
     LinuxDoSettingsState settings=LinuxDoSettingsState.Companion.getInstance();boolean previousAuto=settings.getAutoReportReadTimings();settings.setAutoReportReadTimings(false);

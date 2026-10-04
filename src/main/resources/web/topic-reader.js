@@ -47,7 +47,7 @@
     pendingPosts.add(id); post.classList.add('post-operation-pending');
     const controls=[...post.querySelectorAll('button,input,select,textarea')].map(control=>({control,disabled:control.disabled}));
     controls.forEach(({control})=>control.disabled=true);
-    try { const result=await call(action,id,input); finish(result); return result; }
+    try { const result=await call(action,id,input);finish(result); return result; }
     finally { pendingPosts.delete(id); post.classList.remove('post-operation-pending');controls.forEach(({control,disabled})=>{if(control.isConnected)control.disabled=disabled;}); }
   }
   window.toggleLikeUi = function(el, postId, like) {
@@ -56,6 +56,65 @@
     mutate(post,'like',{like});
   };
   const boostDrafts=new Map();
+  const boostActionReads=new Map();
+  const boostFlagDrafts=new Map();
+  function collapseBoostActions(){
+    document.querySelectorAll('.boost-expand').forEach(b=>b.setAttribute('aria-expanded','false'));
+    document.querySelectorAll('.boost-bubble-actions').forEach(b=>b.hidden=true);
+  }
+  async function readBoostActions(post,id){
+    const key=post.dataset.postId+':'+id;
+    if(boostActionReads.has(key))return boostActionReads.get(key);
+    const request=call('boostActionsInfo',post.dataset.postId,{boostId:Number(id)});
+    boostActionReads.set(key,request);
+    try{return await request;}finally{boostActionReads.delete(key);}
+  }
+  function expandBoost(control){
+    const post=control.closest('.post-entry'),id=control.dataset.boostExpand;
+    if(pendingPosts.has(post.dataset.postId))return;
+    const opened=control.getAttribute('aria-expanded')==='true';collapseBoostActions();if(opened)return;
+    closeBoost();const current=()=>post.querySelector('.boost-bubble[data-boost-id="'+id+'"]');
+    const show=()=>{const bubble=current();bubble?.querySelector('.boost-expand')?.setAttribute('aria-expanded','true');if(bubble?.querySelector('.boost-bubble-actions'))bubble.querySelector('.boost-bubble-actions').hidden=false;return bubble;};
+    const flag=show()?.querySelector('[data-boost-flag]');
+    if(flag){
+      flag.hidden=false;flag.disabled=!config.loggedIn||flag.dataset.boostCanFlag==='false';
+      flag.title=!config.loggedIn?'请先登录':flag.dataset.boostFlagged==='true'?'已举报，等待论坛处理':flag.disabled?'服务器未允许举报此 Boost':'举报此 Boost';
+      // Opening the form is a read; unknown permissions never authorize submission.
+    }
+  }
+  async function reportBoost(post,id){
+    closeBoost();collapseBoostActions();
+    const draftKey=post.dataset.postId+':'+id,box=panel('举报 Boost · #'+post.dataset.postNumber),version=panelVersion;
+    const status=text(box,'正在读取 Boost 举报权限…');status.setAttribute('role','status');
+    const result=await readBoostActions(post,id);if(version!==panelVersion)return;
+    if(result.error){status.textContent=result.error;box.append(button('重新读取',()=>reportBoost(post,id)));return;}
+    const flag=post.querySelector('[data-boost-flag="'+id+'"]');
+    if(flag){flag.dataset.boostCanFlag=String(!!result.canFlag&&!!result.types?.length&&!result.readOnly&&!result.flagged);flag.dataset.boostFlagged=String(!!result.flagged);}
+    text(box,'举报对象：@'+result.username+' 的这条 Boost');
+    const select=document.createElement('select');select.setAttribute('aria-label','Boost 举报原因');
+    result.types?.forEach(type=>{const option=document.createElement('option');option.value=String(type.id);option.textContent=type.name;select.append(option);});box.append(select);
+    const message=document.createElement('textarea');message.maxLength=4000;message.setAttribute('aria-label','Boost 举报说明');box.append(message);
+    const explanation=text(box,'');status.textContent=result.readOnly?'论坛处于只读状态':result.flagged?'已举报，等待论坛处理':'填写原因后确认提交';
+    const draft=boostFlagDrafts.get(draftKey);if(draft){if([...select.options].some(o=>o.value===draft.type))select.value=draft.type;message.value=draft.message;}
+    let busy=false,done=false,blocked=false;
+    const submit=button('确认举报 Boost',async()=>{
+      if(submit.disabled)return;busy=true;update();status.textContent='正在提交…';
+      const outcome=await mutate(post,'boostFlag',{boostId:Number(id),type:Number(select.value),message:message.value});
+      busy=false;if(version!==panelVersion)return;
+      if(!outcome){update();return;}
+      if(outcome.error){status.textContent=outcome.error;blocked=outcome.unconfirmed===true;if(blocked)box.append(button('在网页核对',()=>window.intellijBridge?.handleLinkClick('https://linux.do/t/'+config.topic+'/'+post.dataset.postNumber)));update();return;}
+      if(outcome.cancelled){status.textContent='已取消，说明已保留';update();return;}
+      done=true;boostFlagDrafts.delete(draftKey);status.textContent=outcome.message;update();
+    });
+    function update(){
+      const type=result.types?.find(t=>String(t.id)===select.value);
+      explanation.textContent=type?(type.description||'选择举报原因')+(type.requireMessage?'（必须填写说明）':''):result.flagged?'已举报，等待论坛处理':'服务器未提供可用的 Boost 举报原因';
+      select.disabled=message.disabled=busy||done;
+      submit.disabled=busy||done||blocked||result.readOnly||!type||(type.requireMessage&&!message.value.trim());
+    }
+    const saveDraft=()=>{boostFlagDrafts.set(draftKey,{type:select.value,message:message.value});update();};
+    select.onchange=message.oninput=saveDraft;box.append(submit);update();
+  }
   let boostPopover=null, boostEmojiRules=null;
   const graphemes=new Intl.Segmenter(undefined,{granularity:'grapheme'});
   function boostStats(raw,rules=boostEmojiRules){
@@ -136,10 +195,14 @@
     status.textContent=allowed?'Enter 发送 · Esc 关闭':'服务器未允许发送 Boost，或您已 Boost 此楼层';update();
   }
   document.addEventListener('click',e=>{
+    const expand=e.target.closest('[data-boost-expand]'),flag=e.target.closest('[data-boost-flag]');
+    if(expand&&!expand.disabled){expandBoost(expand);return;}
+    if(flag&&!flag.disabled){reportBoost(flag.closest('.post-entry'),flag.dataset.boostFlag);return;}
     const open=e.target.closest('[data-boost-open]'),remove=e.target.closest('[data-boost-delete]');
     if(open){openBoost(open.closest('.post-entry'));return;}
     if(remove){closeBoost();mutate(remove.closest('.post-entry'),'boostDelete',{boostId:remove.dataset.boostDelete});return;}
     if(boostPopover&&!boostPopover.box.contains(e.target))closeBoost();
+    if(!e.target.closest('.boost-bubble'))collapseBoostActions();
   });
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&boostPopover){e.preventDefault();closeBoost();}});
   addEventListener('resize',e=>{if(e.isTrusted)closeBoost();else positionBoost();});
@@ -339,8 +402,23 @@
       box.append(button('定位原帖',()=>window.intellijBridge?.handleLinkClick('https://linux.do/t/'+topic+'/'+floor)));
     }
     const author=e.target.closest('[data-reader-author]');
-    if(author){const box=panel('公开资料'),version=panelVersion;const result=await call('profile',0,{username:author.dataset.readerAuthor});if(version!==panelVersion)return;if(result.error)text(box,result.error);else {const labels={username:'用户名',name:'姓名',title:'称号',bio_cooked:'简介',created_at:'加入时间',trust_level:'信任等级'};Object.entries(result).forEach(([key,value])=>text(box,(labels[key]||key)+'：'+value));}}
+    if(author&&!author.disabled)showProfile(author.dataset.readerAuthor);
   });
+  async function showProfile(username){
+    closeBoost();collapseBoostActions();const box=panel('用户信息 · @'+username),version=panelVersion;
+    const status=text(box,'正在读取公开资料…');status.setAttribute('role','status');
+    const result=await call('profile',0,{username});if(version!==panelVersion)return;
+    if(result.error){status.textContent=result.error;box.append(button('重新读取',()=>showProfile(username)));return;}
+    status.remove();const header=document.createElement('div');header.className='reader-user-card';
+    if(result.avatarUrl){const avatar=document.createElement('img');avatar.src=result.avatarUrl;avatar.alt='';header.append(avatar);}
+    const identity=document.createElement('strong');identity.textContent='@'+result.username+(result.name?' · '+result.name:'');header.append(identity);box.append(header);
+    const labels={title:'称号',bio_cooked:'简介',created_at:'加入时间',last_seen_at:'最后活跃',trust_level:'信任等级',location:'位置',website:'网站'};
+    Object.entries(labels).forEach(([key,label])=>{if(result[key]!==undefined&&result[key]!==null&&result[key]!==''){
+      let value=result[key];if(key.endsWith('_at')&&!Number.isNaN(Date.parse(value)))value=new Date(value).toLocaleString();
+      text(box,label+'：'+value);
+    }});
+    if(result.profileUrl)box.append(button('在网页查看完整资料',()=>window.intellijBridge?.handleLinkClick(result.profileUrl)));
+  }
   const pollPermissions=new Map();
   function polls(root){
     (root.matches?.('.post-entry')?[root]:root.querySelectorAll('.post-entry')).forEach(post=>{

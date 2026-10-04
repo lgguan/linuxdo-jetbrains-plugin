@@ -27,6 +27,8 @@
     <change-notes><![CDATA[
 <h3>1.0.3</h3>
 <ul>
+<li>Boost avatars open public user cards. Your own Boost shows only a trash icon; other Boosts use the topic's existing flag permissions without a request on expansion. Report forms check current permissions and submissions require confirmation with duplicate-submission protection.</li>
+<li>Public user cards show available profile fields and a full-profile web entry, with explicit retry and safe text rendering.</li>
 <li>Personal bookmarks now support server search, name and reminder editing, and confirmed deletion. Reminder policies are preserved; updates synchronize across project windows and readers.</li>
 <li>The reader bookmark entry opens the personal center. Successful refresh replaces bookmark results, and outdated requests cannot restore deleted entries.</li>
 <li>Forum and personal modules use accessible icons with active highlighting. Embedded login pages retain Tab and Shift+Tab navigation.</li>

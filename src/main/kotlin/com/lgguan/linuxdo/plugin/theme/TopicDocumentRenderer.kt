@@ -570,6 +570,8 @@ object TopicDocumentRenderer {
 
                         // 2. Click on an IMG
                         if (e.target.tagName === 'IMG') {
+                            // Reader avatars belong to user controls, not the image viewer.
+                            if (e.target.closest('[data-reader-author], .reader-user-card')) return;
                             e.preventDefault();
                             e.stopPropagation();
 
@@ -1013,9 +1015,18 @@ object TopicDocumentRenderer {
             val avatar = b.user?.avatarTemplate?.replace("{size}","24")?.takeIf { it.isNotBlank() }?.let {
                 """<img class="boost-avatar" src="${escapeHtml(normalizeUrl(it))}" alt="" loading="lazy">"""
             } ?: """<span class="boost-avatar boost-initial">${escapeHtml(b.getDisplayUsername().take(1))}</span>"""
-            val delete = if (b.canDelete==true && b.id!=null && currentUsername!=null && b.getDisplayUsername().equals(currentUsername,true))
-                """<button type="button" class="action-link boost-delete" data-boost-delete="${b.id}" title="撤回自己的 Boost" aria-label="撤回自己的 Boost">×</button>""" else ""
-            if (content.isBlank()) null else """<span class="boost-bubble" data-boost-id="${b.id ?: ""}"><button type="button" class="boost-user" data-reader-author="$user" title="@$user" aria-label="查看 @$user 的资料">$avatar</button><span class="boost-content">$content</span>$delete</span>"""
+            val own = currentUsername!=null && b.getDisplayUsername().equals(currentUsername,true)
+            val delete = if (own && b.canDelete==true && b.id!=null)
+                """<button type="button" class="action-link boost-delete" data-boost-delete="${b.id}" title="删除自己的 Boost" aria-label="删除自己的 Boost">${ReaderIcons.svg("delete")}</button>""" else ""
+            val canFlag = when {
+                b.userFlagStatus == 0 || b.canFlag == false -> "false"
+                b.canFlag == true && b.availableFlags != null -> b.availableFlags.isNotEmpty().toString()
+                else -> "unknown"
+            }
+            val flag = if (!own && b.id!=null) """<button type="button" class="action-link boost-flag" data-boost-flag="${b.id}" data-boost-can-flag="$canFlag" data-boost-flagged="${b.userFlagStatus == 0}" title="举报此 Boost" aria-label="举报此 Boost" hidden>${ReaderIcons.svg("flag")}</button>""" else ""
+            val actions = if(delete.isNotEmpty() || flag.isNotEmpty()) """<span class="boost-bubble-actions" hidden>$flag$delete</span>""" else ""
+            val display = if(b.id != null) """<button type="button" class="boost-content boost-expand" data-boost-expand="${b.id}" aria-expanded="false" aria-label="查看 @$user 的 Boost 操作">$content</button>""" else """<span class="boost-content">$content</span>"""
+            if (content.isBlank()) null else """<span class="boost-bubble" data-boost-id="${b.id ?: ""}"><button type="button" class="boost-user" data-reader-author="$user" title="@$user · 查看用户信息" aria-label="查看 @$user 的资料">$avatar</button>$display$actions</span>"""
         }.joinToString("")
         if (items.isBlank()) return ""
         return "<div class=\"boost-container\">$items${if(post.canBoost==true)boostEntry() else ""}</div>"

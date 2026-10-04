@@ -1,0 +1,31 @@
+{
+  "passed": 25,
+  "checks": [
+    "report is immediately clickable without expansion requests",
+    "delayed form permissions do not authorize early submission",
+    "form performs a single permissions read",
+    "repeated expansion sends no permissions request",
+    "report form rechecks current permissions",
+    "required message disables submit",
+    "rejection preserves reason and retry",
+    "flag payload carries Boost ID and selected reason",
+    "cancel retains input and enables explicit retry",
+    "reopening retains unsent report draft",
+    "success disables duplicate submit",
+    "avatar loads Booster public card",
+    "avatar IMG target bypasses production lightbox dispatcher",
+    "ordinary body image still reaches production lightbox dispatcher",
+    "public biography remains inert text",
+    "full profile opens selected user",
+    "expanded actions do not duplicate avatar profile entry",
+    "read only disables report submission",
+    "loaded server denial disables report without a request",
+    "unknown metadata permits reading the form but cannot submit without permission",
+    "signed out report entry stays disabled without requests",
+    "own Boost only expands trash without permission reads",
+    "late form permissions do not replace user card or reopen bubble",
+    "profile error offers explicit retry",
+    "uncertain submission blocks retry and provides web verification"
+  ],
+  "realForumWrites": 0
+}

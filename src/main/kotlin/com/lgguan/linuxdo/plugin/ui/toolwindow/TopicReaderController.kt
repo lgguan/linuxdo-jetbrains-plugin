@@ -22,6 +22,12 @@ internal class TopicReaderController(
 ) {
     private val operations = TopicOperationService()
     private val boosts = BoostService()
+    private val boostModeration = BoostModerationService()
+    private val siteCache = SessionCache<JsonObject>()
+    private fun site(version: Long) = siteCache.get() ?: DiscourseApiClient.readerGet("/site.json",version)
+        .getOrThrow().asJsonObject.also { siteCache.put(version,it) }
+    private val boostFlagsCache = SessionCache<List<BoostFlagType>>()
+    private fun boostFlags(version: Long) = boostFlagsCache.get() ?: BoostFlagType.parse(site(version)).also { boostFlagsCache.put(version, it) }
     private val boostRulesCache = SessionCache<BoostEmojiRules>()
     private val rulesCache = SessionCache<ReaderRules>()
     private val uncertain = java.util.concurrent.ConcurrentHashMap.newKeySet<Triple<String,Long,Long>>()
@@ -30,7 +36,7 @@ internal class TopicReaderController(
         filterState?.takeIf { it.first==key && (it.second.isNotBlank() || it.third) }?.let { TopicReadingService.filtered(id,it.second,it.third,version,floor) }
             ?: DiscourseApiClient.getTopicAroundPost(id,floor)
     private fun rules(version: Long): ReaderRules = rulesCache.get() ?: ReaderRules.parse(
-        DiscourseApiClient.readerBootstrap(version).getOrThrow(), DiscourseApiClient.readerGet("/site.json",version).getOrThrow().asJsonObject
+        DiscourseApiClient.readerBootstrap(version).getOrThrow(), site(version)
     ).also { rulesCache.put(version,it) }
     fun handle(key: String, requestId: String, action: String, postId: Long, input: JsonObject, version: Long) {
         if (!active(key,version) || requestId.length !in 1..64 || input.toString().length > 200000) return
@@ -69,6 +75,18 @@ internal class TopicReaderController(
             }.onFailure { respond(key,requestId,json("error" to "阅读设置范围无效")) }
             return
         }
+        if(action == "boostFlag") {
+            val boost = loaded?.boosts?.firstOrNull { it.id == input.get("boostId")?.asLong }
+            if(boost == null) { respond(key,requestId,json("error" to "Boost 已不存在，请刷新楼层")); return }
+            val reason = boostFlagsCache.get()?.firstOrNull { it.id == input.get("type")?.asInt }?.name
+            if(reason == null) { respond(key,requestId,json("error" to "请先读取 Boost 举报原因")); return }
+            val preview = org.jsoup.Jsoup.parse(boost.cooked ?: boost.raw ?: boost.content.orEmpty()).text().take(200)
+            val message = "确认举报 #${loaded?.postNumber} 楼中 @${boost.getDisplayUsername()} 的 Boost？\nBoost：$preview\n原因：$reason\n说明：${input.get("message")?.asString.orEmpty().take(4000)}"
+            if(Messages.showYesNoDialog(project,message,"举报 Boost",Messages.getQuestionIcon()) != Messages.YES) {
+                respond(key,requestId,json("cancelled" to true,"message" to "已取消")); return
+            }
+            if(!active(key,version)) return
+        }
         if (action == "delete" || action == "recover" || action == "flag") {
             val target = requireNotNull(loaded)
             val message = when(action) {
@@ -90,6 +108,19 @@ internal class TopicReaderController(
             var filtering: Pair<String,Boolean>? = null
             val result = runCatching {
                 when(action) {
+                    "boostActionsInfo" -> {
+                        check(LinuxDoAuthService.getInstance().isLoggedIn) { "请先登录" }
+                        val state = boostModeration.readLoaded(current.id,requireNotNull(loaded),input.get("boostId").asLong,version,boostFlags(version))
+                        json("username" to state.boost.getDisplayUsername(),"types" to state.types,
+                            "canFlag" to boostModeration.canReport(state.boost,version),
+                            "flagged" to (state.boost.userFlagStatus == 0),"readOnly" to rules(version).readOnly)
+                    }
+                    "boostFlag" -> {
+                        val operation = boostModeration.flag(current.id,postId,input.get("boostId").asLong,input.get("type").asInt,
+                            input.get("message")?.asString.orEmpty(),version,boostFlags(version),rules(version).readOnly) { active(key,version) }
+                        changed = operation.post; operation.error?.let { throw it }
+                        json("message" to "Boost 举报已提交，等待论坛处理")
+                    }
                     "boostInfo" -> {
                         val post = ForumOperationTransport.post(postId,version).getOrThrow();require(post.topicId==current.id);changed=post
                         val rules = boostRulesCache.get() ?: BoostEmojiRules.parse(DiscourseApiClient.readerBootstrap(version).getOrThrow()).also { boostRulesCache.put(version,it) }
@@ -208,7 +239,7 @@ internal class TopicReaderController(
                     }
                 }
             }
-            val payload=result.getOrElse { error -> json("error" to errorMessage(error)) }
+            val payload=result.getOrElse { error -> json("error" to errorMessage(error),"unconfirmed" to (error is UnconfirmedOperationException)) }
             val post=changed
             val changes=listOfNotNull(post)+relatedChanges
             if(changes.isNotEmpty()) payload.addProperty("html",TopicDocumentRenderer.buildPostFragment(replacement ?: current,changes,LinuxDoSettingsState.getInstance()))

@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-04",
+  "version": "1.0.3",
+  "package": "build/distributions/linuxdo-jetbrains-plugin-1.0.3.zip",
+  "sha256": "37ffeba74a250bfb773eb2ccaf18d3ec5c6a7cc55c03004a0c2e57d20a0af35e",
+  "ide": "IU-262.10968.63",
+  "tests": {
+    "tests": 442,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "desktopTests": true,
+  "buildPlugin": "passed",
+  "verifyPlugin": "passed",
+  "pluginVerifier": "Compatible",
+  "cleanBuild": {
+    "passed": true,
+    "identicalPackage": true
+  },
+  "native": {
+    "composerAndBrowsing": 130,
+    "reader": 89,
+    "keyboard": 11,
+    "realForumWrites": 0
+  },
+  "browserBoostActions": 25,
+  "compatibleBuilds": "262.*",
+  "nativePlatformsTested": [
+    "Windows x64"
+  ],
+  "combinedNativeRun": "Focus timeout between test windows; each suite rerun separately",
+  "githubRelease": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/tag/v1.0.3",
+  "marketplaceId": 34669,
+  "restartRequired": true
+}

@@ -42,9 +42,26 @@ internal object TopicReadingService {
     }
     fun profile(username: String, version: Long): Result<JsonObject> = runCatching {
         require(username.matches(Regex("[\\w.-]{1,60}")))
-        val user = DiscourseApiClient.readerGet("/u/${encoded(username)}/card.json", version).getOrThrow().asJsonObject.getAsJsonObject("user")
-        JsonObject().apply { listOf("username", "name", "title", "bio_cooked", "created_at", "trust_level").forEach { key ->
-            user.get(key)?.takeUnless { it.isJsonNull }?.let { addProperty(key, org.jsoup.Jsoup.parse(it.asString).text().take(3000)) }
-        } }
+        val response = DiscourseApiClient.readerGet("/u/${encoded(username)}/card.json", version).getOrThrow().asJsonObject
+        SessionEpoch.requireCurrent(version)
+        profileCard(response, username, DiscourseApiClient.getBaseUrl())
+    }
+    internal fun profileCard(response: JsonObject, username: String, forum: String): JsonObject {
+        val user = response.getAsJsonObject("user") ?: error("服务器未提供可见用户资料")
+        val returned = user.get("username")?.asString ?: error("用户资料不完整")
+        require(returned.equals(username, true)) { "用户资料目标不匹配" }
+        return JsonObject().apply {
+            listOf("username", "name", "title", "bio_cooked", "created_at", "last_seen_at", "trust_level", "location", "website").forEach { key ->
+                user.get(key)?.takeUnless { it.isJsonNull }?.let { value ->
+                    val document = org.jsoup.Jsoup.parse(value.asString); document.select("script,style").remove()
+                    addProperty(key, document.text().take(3000))
+                }
+            }
+            addProperty("profileUrl", "$forum/u/${encoded(returned)}")
+            user.get("avatar_template")?.takeUnless { it.isJsonNull }?.asString?.let { template ->
+                val uri = runCatching { java.net.URI(forum).resolve(template.replace("{size}", "48")) }.getOrNull()
+                if(uri?.scheme in setOf("http", "https") && uri?.host != null && uri.userInfo == null) addProperty("avatarUrl", uri.toString())
+            }
+        }
     }
 }
