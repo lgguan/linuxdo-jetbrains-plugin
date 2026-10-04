@@ -22,8 +22,8 @@ class TopicReaderFeatureTest {
         assertEquals(listOf("投票已关闭"),error.errors)
     }
     @Test fun `empty bookmarks and visible revision sides preserve server meaning`() {
-        val empty=TopicReadingService.bookmarkPage(JsonParser.parseString("""{"bookmarks":[]}""").asJsonObject)
-        assertEquals(0,empty.getAsJsonArray("items").size());assertFalse(empty.get("more").asBoolean)
+        val empty=PersonalContentParser.parse(JsonParser.parseString("""{"bookmarks":[]}""").asJsonObject,PersonalContentQuery(PersonalContentKind.BOOKMARKS),"https://linux.do","fixture")
+        assertTrue(empty.items.isEmpty());assertNull(empty.next)
         val diff=JsonObject().apply{addProperty("side_by_side_markdown","<table><tr><td class='--previous'>    old\n</td><td class='--current'>    new\n</td></tr></table>")}
         assertEquals("    old\n" to "    new\n",TopicReadingService.revisionBodies(diff))
     }

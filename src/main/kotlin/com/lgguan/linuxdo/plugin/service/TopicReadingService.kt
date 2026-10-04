@@ -8,19 +8,6 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
 internal object TopicReadingService {
-    fun bookmarkPage(response: JsonObject, username: String = "", page: Int = 0): JsonObject {
-        val list=response.getAsJsonObject("user_bookmark_list") ?: response
-        val items=list.getAsJsonArray("bookmarks")?.mapNotNull { value ->
-            val bookmark=com.lgguan.linuxdo.plugin.model.PersonalContentParser.bookmark(value.asJsonObject, DiscourseApiClient.getBaseUrl()) ?: return@mapNotNull null
-            JsonObject().apply {
-                addProperty("title",bookmark.title);addProperty("name",bookmark.detail)
-                addProperty("topic",bookmark.topicId);addProperty("floor",bookmark.floor)
-                addProperty("url",bookmark.webUrl)
-            }
-        }.orEmpty()
-        val next = PersonalContentParser.bookmarkNext(PersonalContentParser.string(list, "more_bookmarks_url"), DiscourseApiClient.getBaseUrl(), username, page)
-        return JsonObject().apply { add("items",Gson().toJsonTree(items));addProperty("more",next != null); addProperty("nextPage",next) }
-    }
     fun revisionBodies(diff: com.google.gson.JsonObject?): Pair<String,String> {
         val markdown=diff?.get("side_by_side_markdown")?.asString.orEmpty()
         val document=org.jsoup.Jsoup.parse(markdown.ifBlank { diff?.get("side_by_side")?.asString.orEmpty() })
@@ -59,9 +46,5 @@ internal object TopicReadingService {
         JsonObject().apply { listOf("username", "name", "title", "bio_cooked", "created_at", "trust_level").forEach { key ->
             user.get(key)?.takeUnless { it.isJsonNull }?.let { addProperty(key, org.jsoup.Jsoup.parse(it.asString).text().take(3000)) }
         } }
-    }
-    fun bookmarks(username: String, page: Int, version: Long): Result<JsonElement> {
-        require(page in 0..10000 && username.matches(Regex("[\\w.-]{1,60}")))
-        return DiscourseApiClient.readerGet("/u/${encoded(username)}/bookmarks.json?page=$page", version)
     }
 }

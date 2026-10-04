@@ -580,7 +580,7 @@ public class IdeUiSmoke implements ApplicationStarter {
       else if(path.equals("/u/search/users.json")) body="{\"users\":[{\"username\":\"neo\"},{\"username\":\"new_user\"}]}";
       else if(path.equals("/categories.json")) body="{\"category_list\":{\"categories\":[{\"id\":4,\"name\":\"开发调优\",\"slug\":\"dev\",\"permission\":1}]}}";
       else if(path.equals("/session/current.json")) body="{\"current_user\":{\"id\":999997,\"username\":\"fixture_login\"}}";
-      else if(path.equals("/latest.json") || path.equals("/top.json") || path.startsWith("/c/") || path.startsWith("/tags/c/") || path.startsWith("/tag/")) {
+      else if(path.equals("/latest.json") || path.equals("/top.json") || path.equals("/hot.json") || path.startsWith("/c/") || path.startsWith("/tags/c/") || path.startsWith("/tag/")) {
         if(failList) code=500;
         else {
           JsonArray topics=new JsonArray();
@@ -800,7 +800,7 @@ public class IdeUiSmoke implements ApplicationStarter {
     });
     await("category filter and tag combined",()->topics.size()==1&&topics.get(0).getId()==210&&!(Boolean)field(panel,"isLoading"));
     check("IDE_TAG_KEYBOARD_GROUP_SEARCH_SINGLE_SELECTION",((Set<?>)field(selector,"selected")).equals(Set.of("软件开发")));
-    check("IDE_CATEGORY_TAG_HOT_SERVER_QUERY",fixture.listRequests.stream().anyMatch(u->u.pathSegments().equals(List.of("tags","c","dev","4","软件开发","l","top.json"))&&"daily".equals(u.queryParameter("period"))));
+    check("IDE_CATEGORY_TAG_HOT_SERVER_QUERY",fixture.listRequests.stream().anyMatch(u->u.pathSegments().equals(List.of("tags","c","dev","4","软件开发","l","hot.json"))&&u.queryParameter("period")==null));
     edt(()->{((JButton)field(panel,"loadMoreButton")).doClick();return null;});
     await("tag pagination",()->topics.size()==2&&topics.get(1).getId()==211);
     edt(()->{panel.refreshList();return null;});await("tag refresh",()->!(Boolean)field(panel,"isLoading"));
@@ -828,7 +828,7 @@ public class IdeUiSmoke implements ApplicationStarter {
       return null;
     });
     await("click list tag filters",()->((Set<?>)field(selector,"selected")).equals(Set.of("中文"))&&!(Boolean)field(panel,"isLoading"));
-    check("IDE_LIST_TAG_CLICK_FILTERS_ON_SERVER",fixture.listRequests.stream().anyMatch(u->u.pathSegments().contains("中文")&&u.encodedPath().endsWith("/l/top.json")));
+    check("IDE_LIST_TAG_CLICK_FILTERS_ON_SERVER",fixture.listRequests.stream().anyMatch(u->u.pathSegments().contains("中文")&&u.encodedPath().endsWith("/l/hot.json")));
     AdvancedSearchDialog advanced=edt(()->new AdvancedSearchDialog(project,"\"引用短语\" -tag:排除 category:4 tags:软件开发+纯水 in:title order:latest_topic min_posts:3",List.of(),4,"忽略的继承标签",q->Unit.INSTANCE));
     edt(()->{advanced.setModal(false);advanced.show();advanced.getWindow().setSize(680,780);advanced.getWindow().setLocation(80,50);return null;});
     await("advanced features",()->((JLabel)field(advanced,"featureStatus")).getText().isEmpty());

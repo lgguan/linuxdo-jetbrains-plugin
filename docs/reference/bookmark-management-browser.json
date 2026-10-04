@@ -1,0 +1,11 @@
+{
+  "passed": 4,
+  "checks": [
+    "bookmark entry calls native personal center",
+    "no independent bookmark list or browser navigation",
+    "failed native entry reports error without losing content",
+    "explicit retry opens native entry"
+  ],
+  "transport": "isolated browser fixture",
+  "realForumWrites": 0
+}

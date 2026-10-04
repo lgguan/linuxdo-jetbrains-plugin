@@ -1,0 +1,20 @@
+{
+  "date": "2026-10-04",
+  "version": "1.0.3",
+  "platform": "Windows x64",
+  "ide": "IU-262.10968.63",
+  "compatibleBuilds": "262.*",
+  "package": "build/distributions/linuxdo-jetbrains-plugin-1.0.3.zip",
+  "sha256": "485ca8415ba645bcade6fb199fcc1b4d5824b8088288d102f2d3bbcc71e8e876",
+  "test": {"passed": 433, "failures": 0, "errors": 0, "skipped": 0, "desktopTests": true},
+  "buildPlugin": "passed",
+  "verifyPlugin": "passed",
+  "pluginVerifier": "Compatible",
+  "idePersonal": {"passed": 49, "evidence": "bookmark-management-ide.txt", "transport": "synthetic account and in-memory HTTP", "memoryBookmarkWrites": 3, "realForumWrites": 0},
+  "ideComposerAndBrowsing": {"passed": 130, "evidence": "bookmark-management-composer-ide.txt", "includesHotCategoryAndTagQuery": true, "realForumWrites": 0},
+  "ideBrowserKeyboard": {"passed": 11, "evidence": "bookmark-management-browser-keyboard-ide.txt", "fixture": "local login form and physical keyboard"},
+  "browserPersonalEntry": {"passed": 4, "evidence": "bookmark-management-browser.json", "realForumWrites": 0},
+  "limitations": ["Real server reminder delivery was not tested", "Real account pagination was not tested", "macOS and Linux native UI were not tested", "Pinned and unsupported bookmark types use web editing"],
+  "published": false,
+  "restartRequired": true
+}

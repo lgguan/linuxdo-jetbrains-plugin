@@ -30,7 +30,7 @@ object Constants {
     enum class TopicFilter(val key: String, val displayName: String, val endpoint: String) {
         LATEST("latest", "最新话题 (Latest)", "/latest.json"),
         TOP("top", "全站热门 (Top)", "/top.json"),
-        HOT("hot", "今日热帖 (Hot)", "/top.json?period=daily"),
+        HOT("hot", "热门话题 (Hot)", "/hot.json"),
         NEW("new", "新话题 (New)", "/new.json"),
         UNREAD("unread", "未读话题 (Unread)", "/unread.json");
 

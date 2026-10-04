@@ -1,4 +1,4 @@
-"""Production bookmark reader script in an isolated browser; no forum transport."""
+"""Production reader bookmark entry opens the native personal center; isolated fixture only."""
 import argparse
 import json
 from pathlib import Path
@@ -10,14 +10,12 @@ parser.add_argument('--endpoint', default='http://127.0.0.1:19337')
 args = parser.parse_args()
 script = (ROOT / 'src/main/resources/web/topic-reader.js').read_text(encoding='utf-8')
 setup = '''
-window.linuxDoPage={key:'fixture',topic:9,loggedIn:true};window.calls=[];window.links=[];window.executed=false;window.failNext=false;
+window.linuxDoPage={key:'fixture',topic:9,loggedIn:true};window.calls=[];window.links=[];window.toasts=[];window.failNext=false;
+window.showDocToast=value=>toasts.push(value);
 window.intellijBridge={handleLinkClick:url=>links.push(url),readerAction:(key,id,action,post,input)=>{
   calls.push({action,input});let result;
   if(failNext){failNext=false;result={error:'HTTP 403'};}
-  else if(input.page===0)result={items:[
-    {title:'<img src=x onerror="executed=true">',name:'<script>executed=true</script>',topic:9,floor:7},
-    {title:'Topic bookmark',topic:10,floor:null}, {title:'Unknown bookmark',topic:null,floor:null,url:null}
-  ],more:true,nextPage:3};else result={items:[],more:false};
+  else result={message:'已打开我的书签'};
   setTimeout(()=>linuxDoReaderResult(key,id,result),0);
 }};
 '''
@@ -32,25 +30,21 @@ with sync_playwright() as playwright:
         page.goto('http://127.0.0.1:8765/personal-reader-fixture')
         page.locator('.topic-reader-tools summary').click()
         page.get_by_role('button', name='我的书签', exact=True).click()
-        page.wait_for_function('calls.length===1 && document.querySelectorAll(".topic-reader-panel button").length>=4')
+        page.wait_for_function('calls.length===1 && toasts.length===1')
 
         def check(name, condition):
             assert condition, name
             checks.append(name)
 
-        check('title and name stay text without HTML execution', page.evaluate('!executed && !document.querySelector(".topic-reader-panel img,.topic-reader-panel script")'))
-        page.get_by_role('button', name='<img src=x onerror="executed=true"> · #7', exact=True).click()
-        page.get_by_role('button', name='Topic bookmark', exact=True).click()
-        check('post floor and topic-only links preserve server targets', page.evaluate('JSON.stringify(links)===JSON.stringify(["https://linux.do/t/9/7","https://linux.do/t/10"])'))
-        check('unknown target is disabled', page.get_by_role('button', name='Unknown bookmark', exact=True).is_disabled())
+        check('bookmark entry calls native personal center', page.evaluate('calls[0].action==="openBookmarks" && Object.keys(calls[0].input).length===0'))
+        check('no independent bookmark list or browser navigation', page.evaluate('!document.querySelector(".topic-reader-panel") && links.length===0'))
         page.evaluate('failNext=true')
-        page.get_by_role('button', name='加载下一页', exact=True).click()
-        page.get_by_role('button', name='重试当前页', exact=True).wait_for()
-        check('continuation uses validated page rather than increment', page.evaluate('calls[1].input.page===3'))
-        page.get_by_role('button', name='重试当前页', exact=True).click()
-        page.wait_for_function('calls.length===3 && [...document.querySelectorAll(".topic-reader-panel button")].some(b=>b.textContent==="加载下一页" && b.hidden)')
-        check('failed continuation retries same page', page.evaluate('calls[2].input.page===3'))
-        check('empty terminal page stops loading', page.get_by_role('button', name='加载下一页', exact=True).is_hidden())
+        page.get_by_role('button', name='我的书签', exact=True).click()
+        page.wait_for_function('toasts.length===2')
+        check('failed native entry reports error without losing content', page.evaluate('toasts[1]==="HTTP 403" && !document.querySelector(".topic-reader-panel")'))
+        page.get_by_role('button', name='我的书签', exact=True).click()
+        page.wait_for_function('toasts.length===3')
+        check('explicit retry opens native entry', page.evaluate('calls.length===3 && calls.every(c=>c.action==="openBookmarks")'))
     finally:
         context.close()
 result = {'passed': len(checks), 'checks': checks, 'transport': 'isolated browser fixture', 'realForumWrites': 0}

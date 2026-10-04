@@ -12,12 +12,20 @@ enum class PersonalContentKind(val label: String, val webPath: String) {
     TOPICS("话题", "topics"), REPLIES("回复", "replies"), BOOKMARKS("书签", "bookmarks"), DRAFTS("草稿", "drafts")
 }
 enum class PersonalDraftType(val label: String) { TOPIC("新话题"), REPLY("回复"), OTHER("其他类型") }
+data class BookmarkMetadata(val id: Long, val targetType: String, val targetId: Long?,
+    val name: String = "", val reminderAt: String? = null, val pinned: Boolean = false) {
+    val editable: Boolean get() = targetType == "Post" && targetId != null && !pinned
+    val deletable: Boolean get() = targetType in setOf("Post", "Topic") && targetId != null
+}
 data class PersonalContentItem(val key: String, val title: String, val summary: String = "", val time: String = "",
     val detail: String = "", val topicId: Long? = null, val floor: Int? = null, val webUrl: String? = null,
-    val draftKey: String? = null, val draftType: PersonalDraftType? = null, val postId: Long? = null) {
+    val draftKey: String? = null, val draftType: PersonalDraftType? = null, val postId: Long? = null,
+    val bookmark: BookmarkMetadata? = null) {
     fun matches(query: String) = query.isBlank() || listOf(title, summary, detail).any { it.contains(query.trim(), true) }
 }
-data class PersonalContentQuery(val kind: PersonalContentKind, val offset: Int = 0) { init { require(offset in 0..1_000_000) } }
+data class PersonalContentQuery(val kind: PersonalContentKind, val offset: Int = 0, val searchTerm: String = "") {
+    init { require(offset in 0..1_000_000); require(searchTerm.length <= 500); require(kind == PersonalContentKind.BOOKMARKS || searchTerm.isEmpty()) }
+}
 data class PersonalContentPage(val items: List<PersonalContentItem>, val rawCount: Int, val next: PersonalContentQuery?, val warning: String? = null)
 data class PersonalContentState(val items: List<PersonalContentItem> = emptyList(), val next: PersonalContentQuery? = null,
     val loaded: Boolean = false, val loading: Boolean = false, val error: String? = null,
@@ -34,7 +42,8 @@ internal object PersonalContentParser {
     private fun floor(obj: JsonObject, key: String): Int? = number(obj, key)?.takeIf { it <= Int.MAX_VALUE }?.toInt()
     fun path(query: PersonalContentQuery, username: String): String = when(query.kind) {
         PersonalContentKind.TOPICS, PersonalContentKind.REPLIES -> "/user_actions.json?username=${encoded(username)}&filter=${if(query.kind == PersonalContentKind.TOPICS) 4 else 5}&offset=${query.offset}&limit=$LIMIT"
-        PersonalContentKind.BOOKMARKS -> "/u/${encoded(username)}/bookmarks.json?page=${query.offset}"
+        PersonalContentKind.BOOKMARKS -> "/u/${encoded(username)}/bookmarks.json?page=${query.offset}" +
+            if(query.searchTerm.isBlank()) "" else "&q=${encoded(query.searchTerm)}"
         PersonalContentKind.DRAFTS -> "/drafts.json?offset=${query.offset}&limit=$LIMIT"
     }
     fun safeUrl(raw: String, base: String): String? = runCatching {
@@ -47,7 +56,9 @@ internal object PersonalContentParser {
         val origin = URI(base); val url = origin.resolve(raw)
         require(url.scheme == origin.scheme && url.host == origin.host && url.port == origin.port && url.userInfo == null && url.fragment == null)
         require(url.path in setOf("/u/$username/bookmarks", "/u/$username/bookmarks.json"))
-        val page = Regex("page=([0-9]+)").matchEntire(url.query.orEmpty())?.groupValues?.get(1)?.toInt() ?: error("Invalid page")
+        val params = url.rawQuery.orEmpty().split('&').map { it.split('=', limit = 2) }
+        require(params.all { it.size == 2 && it[0] in setOf("page", "q") } && params.map { it[0] }.distinct().size == params.size)
+        val page = params.single { it[0] == "page" }[1].takeIf { it.matches(Regex("[0-9]+")) }?.toInt() ?: error("Invalid page")
         require(page > current && page <= 10000); page
     }.getOrNull()
     fun bookmark(obj: JsonObject, base: String): PersonalContentItem? {
@@ -58,9 +69,15 @@ internal object PersonalContentParser {
         val known = type in setOf("", "Post", "Topic")
         val target = topic?.takeIf { known && (floor != null || type == "Topic") }
         val web = listOf("url", "bookmarkable_url").firstNotNullOfOrNull { safeUrl(string(obj, it), base) }
-        return PersonalContentItem("bookmark:$id", text(string(obj, "title")).ifBlank { "书签" }, time = string(obj, "created_at"),
-            detail = listOf(string(obj, "name"), floor?.let { "#$it" }.orEmpty(), string(obj, "reminder_at")).filter { it.isNotBlank() }.joinToString(" · "),
-            topicId = target, floor = if(type == "Topic") null else floor, webUrl = web)
+        val reminder = string(obj, "reminder_at").takeIf { it.isNotBlank() }
+        val reminderText = reminder?.let { runCatching {
+            "提醒 " + java.time.Instant.parse(it).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+        }.getOrDefault("提醒 $it") }.orEmpty()
+        return PersonalContentItem("bookmark:$id", text(string(obj, "title")).ifBlank { "书签" }, summary = text(string(obj, "excerpt")), time = string(obj, "updated_at").ifBlank { string(obj, "created_at") },
+            detail = listOf(string(obj, "name"), floor?.let { "#$it" }.orEmpty(), reminderText).filter { it.isNotBlank() }.joinToString(" · "),
+            topicId = target, floor = if(type == "Topic") null else floor, webUrl = web,
+            bookmark = BookmarkMetadata(id, type, number(obj, "bookmarkable_id"), string(obj, "name"),
+                reminder, runCatching { obj["pinned"]?.asBoolean == true }.getOrDefault(false)))
     }
     fun parse(response: JsonObject, query: PersonalContentQuery, base: String, username: String): PersonalContentPage {
         val container = if(query.kind == PersonalContentKind.BOOKMARKS) response.get("user_bookmark_list")?.takeIf { it.isJsonObject }?.asJsonObject ?: response else response

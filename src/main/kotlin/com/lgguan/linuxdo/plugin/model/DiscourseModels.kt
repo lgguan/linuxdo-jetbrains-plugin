@@ -139,6 +139,7 @@ data class Post(
     @SerializedName("bookmark_id") val bookmarkId: Long? = null,
     @SerializedName("bookmark_name") val bookmarkName: String? = null,
     @SerializedName("bookmark_reminder_at") val bookmarkReminderAt: String? = null,
+    @SerializedName("bookmark_auto_delete_preference") val bookmarkAutoDeletePreference: Int? = null,
     @SerializedName("reactions") val reactions: List<Reaction>? = null,
     @SerializedName("current_user_reaction") val currentUserReaction: UserReaction? = null,
     @SerializedName("can_accept_answer") val canAcceptAnswer: Boolean? = null,

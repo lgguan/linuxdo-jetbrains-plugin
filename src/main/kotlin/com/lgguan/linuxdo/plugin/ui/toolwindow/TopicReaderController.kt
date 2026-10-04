@@ -35,6 +35,20 @@ internal class TopicReaderController(
     fun handle(key: String, requestId: String, action: String, postId: Long, input: JsonObject, version: Long) {
         if (!active(key,version) || requestId.length !in 1..64 || input.toString().length > 200000) return
         val current = topic() ?: return
+        if(action == "openBookmarks") {
+            if(LinuxDoBossKeyService.getInstance(project).isHidden || !LinuxDoAuthService.getInstance().isLoggedIn) {
+                respond(key, requestId, json("error" to "请先登录并显示插件窗口")); return
+            }
+            com.intellij.openapi.wm.ToolWindowManager.getInstance(project).getToolWindow(com.lgguan.linuxdo.plugin.common.Constants.TOOL_WINDOW_ID)?.let { window ->
+                window.show {
+                    if(!active(key, version) || LinuxDoBossKeyService.getInstance(project).isHidden) return@show
+                    val main = window.contentManager.contents.firstOrNull()?.component as? LinuxDoDocMainPanel
+                    main?.issueListPanel?.let { list -> list.personalContentPanel.selectKind(PersonalContentKind.BOOKMARKS); list.selectPersonalView(true) }
+                }
+                respond(key, requestId, json("message" to "已打开我的书签"))
+            } ?: respond(key, requestId, json("error" to "个人中心暂不可用，请打开 API Docs 工具窗口"))
+            return
+        }
         if (action == "retryReadSync") {
             if (!LinuxDoSettingsState.getInstance().autoReportReadTimings) {
                 respond(key,requestId,json("message" to "自动同步已关闭；待同步数据已保留，请在设置中开启后补传"))
@@ -108,11 +122,6 @@ internal class TopicReaderController(
                         val post=Gson().fromJson(DiscourseApiClient.readerGet("/t/${current.id}/posts.json?post_ids[]=${requireNotNull(id)}",version).getOrThrow(),PostStreamResponse::class.java).postStream.posts.firstOrNull { it.id==id } ?: error("筛选结果中没有可定位楼层")
                         json("floor" to post.postNumber)
                     }
-                    "bookmarks" -> {
-                        val user=LinuxDoAuthService.getInstance().currentUser?.username ?: error("请先登录")
-                        val response=TopicReadingService.bookmarks(user,input.get("page").asInt,version).getOrThrow().asJsonObject
-                        TopicReadingService.bookmarkPage(response, user, input.get("page").asInt)
-                    }
                     "subscription", "topicVote" -> ReaderWriteGate.shared.serialized {
                         val identity = Triple(key,version,0L)
                         check(identity !in uncertain) { "上次话题操作结果未确认，请核对服务器状态后重新打开话题" }
@@ -144,7 +153,12 @@ internal class TopicReaderController(
                         val post=ForumOperationTransport.post(postId,version).getOrThrow();require(post.topicId==current.id);changed=post
                         when(action) {
                             "postInfo" -> json("message" to "帖子已更新")
-                            "bookmarkInfo" -> json("bookmarked" to post.bookmarked,"name" to post.bookmarkName,"reminder" to post.bookmarkReminderAt)
+                            "bookmarkInfo" -> {
+                                val checked = BookmarkService.getInstance().reconcilePost(post, version)
+                                checked.error?.let { throw it }
+                                changed = checked.post ?: post
+                                json("bookmarked" to changed?.bookmarked,"name" to changed?.bookmarkName,"reminder" to changed?.bookmarkReminderAt)
+                            }
                             "flagInfo" -> json("types" to rules(version).flags.filter { PostCapabilities.flag(post,it.id) })
                             "reactionInfo" -> json("current" to post.currentUserReaction?.id,"reactions" to (current.validReactions ?: rules(version).reactions))
                             "pollInfo" -> rules(version).let { json("undo" to it.pollUndo,"groups" to it.groups,"readOnly" to it.readOnly) }
@@ -177,7 +191,7 @@ internal class TopicReaderController(
                         if(operation.error==null && action=="delete" && changed==null){
                             changed=loaded?.copy(cooked="<p>服务器已删除此楼层。</p>",raw=null,canEdit=false,canDelete=false,canRecover=false,canViewEditHistory=false,actionsSummary=emptyList(),reactions=null,polls=null,userDeleted=true)
                         }
-                        if(operation.error is UnconfirmedOperationException) uncertain.add(identity)
+                        if(operation.error is UnconfirmedOperationException && action !in setOf("bookmark", "unbookmark")) uncertain.add(identity)
                         operation.error?.let { throw it }
                         if(action in setOf("accept","unaccept")){
                             // A newly accepted answer can change another loaded post's solved status.

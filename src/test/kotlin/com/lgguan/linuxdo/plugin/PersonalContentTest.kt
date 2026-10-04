@@ -115,4 +115,44 @@ class PersonalContentTest {
         assertTrue(h.service.state(kind).dirty); h.service.visit(kind); assertEquals(1, h.tasks.size); h.finish()
         h.user = h.user!!.copy(forum = "https://other.test"); assertTrue(h.service.state(kind).items.isEmpty()); h.service.dispose()
     }
+    @Test fun `bookmark query encodes search and carries it when the server continuation omits q`() {
+        val q = PersonalContentQuery(PersonalContentKind.BOOKMARKS, searchTerm = "中文 & C++")
+        assertTrue(PersonalContentParser.path(q, "fixture").contains("q=%E4%B8%AD%E6%96%87%20%26%20C%2B%2B"))
+        val page = PersonalContentParser.parse(JsonParser.parseString("""{"bookmarks":[],"more_bookmarks_url":"/u/fixture/bookmarks?page=2"}""").asJsonObject,q,base,"fixture")
+        assertEquals(q.copy(offset=2),page.next)
+        assertEquals(2,PersonalContentParser.bookmarkNext("/u/fixture/bookmarks.json?page=2&q=ignored",base,"fixture",0))
+        assertNull(PersonalContentParser.bookmarkNext("/u/fixture/bookmarks?page=1&page=2",base,"fixture",0))
+    }
+    @Test fun `bookmark refresh replaces the snapshot while failed refresh retains it`() {
+        val h=Harness();val kind=PersonalContentKind.BOOKMARKS
+        h.service.visit(kind);h.finish();h.service.loadMore(kind);h.finish()
+        h.response={Result.success(PersonalContentPage(listOf(PersonalContentItem("new","replacement")),1,null))}
+        h.service.refresh(kind);h.finish();assertEquals(listOf("new"),h.service.state(kind).items.map{it.key});assertNull(h.service.state(kind).next)
+        h.response={Result.failure(HttpStatusException(403))};h.service.refresh(kind);h.finish()
+        assertEquals(listOf("new"),h.service.state(kind).items.map{it.key});h.service.dispose()
+    }
+    @Test fun `different window searches never mix results and deletion rejects old inflight snapshots`() {
+        val h=Harness();val kind=PersonalContentKind.BOOKMARKS
+        val item=PersonalContentItem("bookmark:9","old",bookmark=BookmarkMetadata(9,"Post",90))
+        h.response={q->Result.success(PersonalContentPage(listOf(item.copy(title=q.searchTerm)),1,null))}
+        h.service.visit(kind,"first");h.service.visit(kind,"second");h.finish();h.finish()
+        assertEquals("first",h.service.state(kind,"first").items.single().title)
+        assertEquals("second",h.service.state(kind,"second").items.single().title)
+        h.service.refresh(kind,"first")
+        h.service.bookmarkChanged(9,true,1)
+        assertTrue(h.service.state(kind,"first").items.isEmpty());assertTrue(h.service.state(kind,"second").items.isEmpty())
+        h.finish();assertTrue(h.service.state(kind,"first").items.isEmpty());assertTrue(h.service.state(kind,"first").dirty)
+        h.response={Result.success(PersonalContentPage(emptyList(),0,null))};h.service.visit(kind,"first");h.finish()
+        assertFalse(h.service.state(kind,"first").dirty);h.service.dispose()
+    }
+    @Test fun `search eviction preserves another visible window and releases it on disposal`() {
+        val h=Harness();val kind=PersonalContentKind.BOOKMARKS
+        val view=com.intellij.openapi.util.Disposer.newDisposable()
+        h.service.retainView(view,kind,"keep");h.service.visit(kind,"keep");h.finish()
+        repeat(12){h.service.visit(kind,"query$it");h.finish()}
+        assertTrue(h.service.state(kind,"keep").loaded)
+        com.intellij.openapi.util.Disposer.dispose(view)
+        h.service.visit(kind,"final");h.finish();assertFalse(h.service.state(kind,"keep").loaded)
+        h.service.dispose()
+    }
 }

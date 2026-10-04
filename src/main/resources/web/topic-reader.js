@@ -210,17 +210,7 @@
     }));
   }
   async function bookmarks() {
-    const box=panel('我的书签'); let page=0,busy=false;
-    const more=button('加载下一页',load);
-    async function load(){
-      if(busy)return;busy=true;more.disabled=true; const version=panelVersion;
-      const result=await call('bookmarks',0,{page});busy=false;
-      if(version!==panelVersion)return;
-      if(result.error){text(box,result.error);more.hidden=false;more.disabled=false;more.textContent='重试当前页';return;}
-      else result.items?.forEach(item=>{const row=document.createElement('div');const url=item.topic?'https://linux.do/t/'+item.topic+(item.floor?'/'+item.floor:''):item.url;row.append(button(item.title+(item.floor?' · #'+item.floor:''),()=>url&&window.intellijBridge?.handleLinkClick(url),!!url));text(row,item.name || '');box.insertBefore(row,more);});
-      more.hidden=!result.more;more.disabled=false;more.textContent='加载下一页';if(result.more)page=result.nextPage;
-    }
-    box.append(more);load();
+    finish(await call('openBookmarks',0,{}));
   }
   async function subscription(){
     const box=panel('话题通知');

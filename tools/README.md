@@ -102,3 +102,5 @@ python -m http.server 8765 --bind 127.0.0.1 --directory output/playwright
 `ui --notifications-only` 在目标 IDEA 中打开两个真实项目窗口，通过通知按钮和列表点击进入实际 `FileEditorManager`，并派发 IDE 气泡的生产动作。覆盖新开与复用、403/404/缺失楼层、Boost 与个人消息、跨窗口计数和请求合并、切换标签页取消、老板键隐藏与恢复、模拟账号切换及原生 JCEF 回调通道断连后的重试。使用独立配置、模拟凭据和内存 HTTP，所有论坛写请求均被接管。两个测试窗口置顶，以免桌面上的其他程序挡住鼠标测试；退出时关闭这些测试项目。
 
 `python tools/notification-reference-check.py` 使用已有专用论坛页面执行 GET，只保存类型配置和字段汇总，不导出 Cookie、CSRF、用户名、正文或通知 ID，遇论坛错误即停止。本站真实标读需账号拥有者另行明确授权。
+
+`ui --personal-only` 同时覆盖书签全量搜索（包含首屏之外的匹配）、两个项目窗口的独立搜索、原生书签编辑、提醒设置/取消、提醒后策略保留、删除同步和正文节点保留。书签写入由内存 HTTP 接管，其他写请求仍拒绝；真实论坛写入为零。`tools/personal-browser-check.py` 验证正文“我的书签”转到原生个人中心、失败提示及显式重试，不再维护第二份浏览器书签列表。

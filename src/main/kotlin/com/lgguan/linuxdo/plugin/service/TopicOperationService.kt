@@ -80,6 +80,11 @@ internal class TopicOperationService(
             require(post.id == postId && post.topicId == topic.id) { "帖子不属于当前话题" }
             observed = post
             if (rules?.readOnly == true) error("论坛处于只读状态")
+            if(transport === ForumOperationTransport && action in setOf("bookmark", "unbookmark")) {
+                return@serialized BookmarkService.getInstance().reader(post, input.get("name")?.asString.orEmpty(),
+                    input.get("reminder")?.takeUnless { it.isJsonNull }?.asString?.takeIf { it.isNotBlank() },
+                    action == "unbookmark", version, active)
+            }
             val request = request(topic, post, action, input, rules)
             gate.beforeWrite()
             checkSession(version); check(active()) { "页面已关闭或切换" }
@@ -126,7 +131,9 @@ internal class TopicOperationService(
                 "bookmark" -> { require(post.bookmarked != null); val name = text("name"); require(name.length <= 100)
                     val reminder = text("reminder").takeIf { it.isNotBlank() }?.also { require(java.time.Instant.parse(it).isAfter(java.time.Instant.now())) { "提醒时间必须晚于当前时间" } }
                     OperationRequest(post.bookmarkId?.let { "/bookmarks/$it.json" } ?: "/bookmarks.json", if (post.bookmarkId == null) "POST" else "PUT",
-                        json("bookmarkable_id" to id, "bookmarkable_type" to "Post", "name" to name, "reminder_at" to reminder)) }
+                        json("bookmarkable_id" to id, "bookmarkable_type" to "Post", "name" to name, "reminder_at" to reminder).apply {
+                            post.bookmarkAutoDeletePreference?.let { addProperty("auto_delete_preference", it) }
+                        }) }
                 "unbookmark" -> OperationRequest("/bookmarks/${requireNotNull(post.bookmarkId)}.json", "DELETE", JsonObject())
                 "edit" -> { require(post.canEdit == true); require(text("original").isNotEmpty() && text("raw").isNotBlank() && text("raw").length <= 100000)
                     OperationRequest("/posts/$id.json", "PUT", json("post" to json("raw" to text("raw"), "original_text" to text("original"), "edit_reason" to text("reason").take(500)))) }

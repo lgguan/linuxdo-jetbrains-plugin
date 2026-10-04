@@ -106,7 +106,9 @@ public final class PersonalIdeAcceptance implements ApplicationStarter {
     front(p);edt(()->{for(Notification n:NotificationsManager.getNotificationsManager().getNotificationsOfType(Notification.class,p))n.expire();for(Notification n:NotificationsManager.getNotificationsManager().getNotificationsOfType(Notification.class,null))n.expire();return null;});Thread.sleep(1000);Rectangle bounds=edt(()->WindowManager.getInstance().getFrame(p).getBounds());ImageIO.write(new Robot().createScreenCapture(bounds),"png",output.resolve(name+".png").toFile());report.println("SCREENSHOT="+name+".png");
   }
   private static class Fixture implements okhttp3.Interceptor {
-    final AtomicInteger pages=new AtomicInteger(), writes=new AtomicInteger();
+    final AtomicInteger pages=new AtomicInteger(), writes=new AtomicInteger(), bookmarkWrites=new AtomicInteger();
+    volatile String bookmarkName="Reminder",bookmarkReminder=null;volatile boolean bookmarkDeleted;
+    volatile int savedBookmarkPolicy=-1;
     final List<String> draftReads=new CopyOnWriteArrayList<>();
     final Map<String,JsonObject> drafts=new ConcurrentHashMap<>();
     volatile String holdPath="";volatile int failure,topicFailure;volatile boolean shifted;
@@ -121,9 +123,24 @@ public final class PersonalIdeAcceptance implements ApplicationStarter {
     static JsonObject json(String value){return JsonParser.parseString(value).getAsJsonObject();}
     void hold(String path){holdPath=path;entered=new CountDownLatch(1);release=new CountDownLatch(1);}
     void unblock(){holdPath="";release.countDown();}
+    JsonObject bookmarkPost(){
+      JsonObject post=json("{\"id\":9901012,\"topic_id\":990101,\"post_number\":2,\"username\":\"fixture\",\"cooked\":\"<p>Personal content reader floor 2</p>\"}");
+      post.addProperty("bookmarked",!bookmarkDeleted);post.addProperty("bookmark_id",bookmarkDeleted?null:1);
+      post.addProperty("bookmark_name",bookmarkDeleted?null:bookmarkName);post.addProperty("bookmark_reminder_at",bookmarkReminder);
+      post.addProperty("bookmark_auto_delete_preference",0);return post;
+    }
     public okhttp3.Response intercept(okhttp3.Interceptor.Chain chain)throws IOException {
       var request=chain.request();String path=request.url().encodedPath();String body="{}";int code=200;
-      if(!request.method().equals("GET")){writes.incrementAndGet();code=503;}
+      if(!request.method().equals("GET")&&path.equals("/bookmarks/1.json")){
+        bookmarkWrites.incrementAndGet();
+        if(request.method().equals("DELETE")){bookmarkDeleted=true;bookmarkReminder=null;}
+        else if(request.method().equals("PUT")){
+          okio.Buffer buffer=new okio.Buffer();request.body().writeTo(buffer);JsonObject data=json(buffer.readUtf8());
+          bookmarkName=data.get("name").getAsString();bookmarkReminder=data.get("reminder_at").isJsonNull()?null:data.get("reminder_at").getAsString();
+          savedBookmarkPolicy=data.get("auto_delete_preference").getAsInt();
+        }else throw new IOException("Unexpected bookmark mutation");
+        body="{\"success\":\"OK\"}";
+      }else if(!request.method().equals("GET")){writes.incrementAndGet();code=503;}
       else if(path.equals("/user_actions.json")){
         pages.incrementAndGet();int offset=Integer.parseInt(request.url().queryParameter("offset"));JsonArray rows=new JsonArray();
         for(int i=offset;i<Math.min(offset+30,65);i++){int n=i+(shifted?100:0);JsonObject r=json("{\"topic_id\":990101,\"post_number\":2,\"title\":\"Personal row "+n+"\",\"excerpt\":\"<b>Plain summary</b><script>danger()</script>\",\"created_at\":\"2026-10-03\"}");if(request.url().queryParameter("filter").equals("4"))r.addProperty("topic_id",990101+n);else {r.addProperty("post_id",9901010+n);r.addProperty("post_number",n+1);}rows.add(r);}
@@ -131,8 +148,15 @@ public final class PersonalIdeAcceptance implements ApplicationStarter {
         JsonObject result=new JsonObject();result.add("user_actions",rows);body=result.toString();if(failure>0){code=failure;failure=0;}
       }else if(path.endsWith("/bookmarks.json")){
         pages.incrementAndGet();int page=Integer.parseInt(request.url().queryParameter("page"));JsonArray rows=new JsonArray();
-        for(int i=page*30;i<Math.min(page*30+30,35);i++)rows.add(json("{\"id\":"+(i+1)+",\"topic_id\":990101,\"bookmarkable_type\":\"Post\",\"linked_post_number\":2,\"title\":\"Bookmark "+i+"\",\"name\":\"Reminder\"}"));
-        JsonObject result=new JsonObject();result.add("bookmarks",rows);if(page==0)result.addProperty("more_bookmarks_url",path.replace(".json","")+"?page=1");body="{\"user_bookmark_list\":"+result+"}";
+        String term=Objects.requireNonNullElse(request.url().queryParameter("q"),"").toLowerCase(Locale.ROOT);List<JsonObject> matches=new ArrayList<>();
+        for(int i=0;i<35;i++){
+          if(i==0&&bookmarkDeleted)continue;
+          JsonObject row=json("{\"id\":"+(i+1)+",\"topic_id\":990101,\"bookmarkable_id\":"+(9901012+i)+",\"bookmarkable_type\":\"Post\",\"linked_post_number\":2,\"title\":\"Bookmark "+i+"\",\"name\":\"Reminder\"}");
+          if(i==0){row.addProperty("name",bookmarkName);row.addProperty("reminder_at",bookmarkReminder);}
+          if(term.isBlank()||row.toString().toLowerCase(Locale.ROOT).contains(term))matches.add(row);
+        }
+        for(int i=page*30;i<Math.min(page*30+30,matches.size());i++)rows.add(matches.get(i));
+        JsonObject result=new JsonObject();result.add("bookmarks",rows);if((page+1)*30<matches.size())result.addProperty("more_bookmarks_url",path.replace(".json","")+"?page="+(page+1));body="{\"user_bookmark_list\":"+result+"}";
       }else if(path.equals("/drafts.json")){
         pages.incrementAndGet();JsonArray rows=new JsonArray();for(var e:drafts.entrySet()){JsonObject row=new JsonObject();row.addProperty("draft_key",e.getKey());row.addProperty("sequence",1);row.add("data",e.getValue());rows.add(row);}
         rows.add(json("{\"draft_key\":\"unknown\",\"data\":\"{\"}"));body="{\"drafts\":"+rows+"}";
@@ -140,10 +164,12 @@ public final class PersonalIdeAcceptance implements ApplicationStarter {
         String key=path.substring(8,path.length()-5);draftReads.add(key);JsonObject response=new JsonObject();response.addProperty("draft_sequence",1);response.add("draft",drafts.get(key));body=response.toString();
       }else if(path.matches("/t/[0-9]+(?:/[0-9]+)?\\.json")){
         long topic=Long.parseLong(path.split("/")[2].replace(".json",""));JsonArray posts=new JsonArray(),stream=new JsonArray();
-        for(int i=1;i<=3;i++){long id=topic*10+i;stream.add(id);posts.add(json("{\"id\":"+id+",\"topic_id\":"+topic+",\"post_number\":"+i+",\"username\":\"fixture\",\"cooked\":\"<p>Personal content reader floor "+i+"</p>\"}"));}
+        for(int i=1;i<=3;i++){long id=topic*10+i;stream.add(id);posts.add(topic==990101&&i==2?bookmarkPost():json("{\"id\":"+id+",\"topic_id\":"+topic+",\"post_number\":"+i+",\"username\":\"fixture\",\"cooked\":\"<p>Personal content reader floor "+i+"</p>\"}"));}
         body="{\"id\":"+topic+",\"archetype\":\"regular\",\"title\":\"Personal reader\",\"posts_count\":3,\"highest_post_number\":3,\"details\":{\"can_create_post\":true},\"post_stream\":{\"posts\":"+posts+",\"stream\":"+stream+"}}";
         if(topicFailure>0){code=topicFailure;topicFailure=0;}
-      }else if(path.equals("/posts/9901010.json"))body="{\"id\":9901010,\"topic_id\":990101,\"post_number\":2,\"username\":\"fixture\"}";
+      }else if(path.equals("/posts/9901012.json"))body=bookmarkPost().toString();
+      else if(path.equals("/t/990101/posts.json"))body="{\"post_stream\":{\"posts\":["+bookmarkPost()+"]}}";
+      else if(path.equals("/posts/9901010.json"))body="{\"id\":9901010,\"topic_id\":990101,\"post_number\":2,\"username\":\"fixture\"}";
       else if(path.equals("/site.json"))body="{\"categories\":[],\"notification_types\":{}}";
       else if(path.equals("/categories.json"))body="{\"category_list\":{\"categories\":[]}}";
       else if(path.equals("/latest.json"))body="{\"topic_list\":{\"topics\":[{\"id\":990101,\"title\":\"Forum retained row\"}]},\"users\":[]}";
@@ -151,6 +177,7 @@ public final class PersonalIdeAcceptance implements ApplicationStarter {
       else if(path.equals("/notifications.json"))body="{\"notifications\":[]}";
       else if(path.equals("/notifications/totals.json"))body="{\"unread_notifications\":0,\"unread_personal_messages\":0}";
       else if(path.equals("/session/current.json"))body="{\"current_user\":{\"id\":7,\"username\":\"fixture\"}}";
+      else if(path.equals("/session/csrf.json"))body="{\"csrf\":\"synthetic-bookmark-token\"}";
       if(path.equals(holdPath)){entered.countDown();try{if(!release.await(45,TimeUnit.SECONDS))throw new IOException("Fixture hold expired");}catch(InterruptedException e){throw new IOException(e);}}
       return new okhttp3.Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1).code(code).message("memory personal acceptance").body(okhttp3.ResponseBody.create(body,okhttp3.MediaType.parse("application/json"))).build();
     }
@@ -164,6 +191,14 @@ public final class PersonalIdeAcceptance implements ApplicationStarter {
   private static Object draftEditor(Class<?> type,String key)throws Exception {
     for(Object d:editors(type)){Object session=field(d,"draftSession");if(session.getClass().getMethod("getKey").invoke(session).equals(key))return d;}return null;
   }
+  private static List<Component> components(Component root){
+    List<Component> result=new ArrayList<>();result.add(root);if(root instanceof Container container)for(Component child:container.getComponents())result.addAll(components(child));return result;
+  }
+  private static Window bookmarkWindow(){
+    for(Window window:Window.getWindows())if(window.isShowing()&&components(window).stream().anyMatch(c->"bookmark-name".equals(c.getName())))return window;return null;
+  }
+  private static Component named(Window window,String name){return components(window).stream().filter(c->name.equals(c.getName())).findFirst().orElseThrow();}
+  private static JButton saveButton(Window window){return components(window).stream().filter(c->c instanceof JButton button&&button.getText().equals("保存")).map(c->(JButton)c).findFirst().orElseThrow();}
   private static void run()throws Exception {
     Registry.get("ide.experimental.ui.onboarding").setValue(false);
     var settings=LinuxDoSettingsState.Companion.getInstance();settings.setNetworkMode("JAVA_ONLY");settings.setEnableNotificationPolling(false);settings.setAutoReportReadTimings(false);
@@ -215,12 +250,46 @@ public final class PersonalIdeAcceptance implements ApplicationStarter {
     var reader=edt(()->editor(first,990101));await("native body",()->field(reader.getComponent(),"currentTopic")!=null&&field(reader.getComponent(),"jbCefBrowser")!=null);
     boolean visible=false;for(int i=0;i<25&&!visible;i++){try{visible=evaluate(reader,"({ok:!!document.querySelector('#floor-2 .post-content')&&document.querySelector('#floor-progress').value==='2'})").get("ok").getAsBoolean();}catch(Exception ignored){}if(!visible)Thread.sleep(200);}
     check("LINKED_POST_NUMBER_OPENS_NATIVE_FLOOR",visible);
-    edt(()->{((JTextField)field(pa,"filter")).setText("Bookmark 0");return null;});
+    edt(()->{((JComboBox<?>)field(pa,"searchScope")).setSelectedIndex(1);((JTextField)field(pa,"filter")).setText("Bookmark 0");return null;});
     int editorCount=edt(()->FileEditorManager.getInstance(first).getOpenFiles().length);
     edt(()->{var list=rows(pa);Rectangle bounds=list.getCellBounds(0,0);list.dispatchEvent(new java.awt.event.MouseEvent(list,java.awt.event.MouseEvent.MOUSE_CLICKED,System.currentTimeMillis(),0,20,bounds.height+30,1,false,java.awt.event.MouseEvent.BUTTON1));return null;});
     check("BLANK_LIST_AREA_DOES_NOT_OPEN_LAST_ROW",edt(()->FileEditorManager.getInstance(first).getOpenFiles().length==editorCount));
     edt(()->{((JTextField)field(pa,"filter")).setText("");return null;});
     edt(()->{service.loadMore(PersonalContentKind.BOOKMARKS);return null;});settled(PersonalContentKind.BOOKMARKS);check("BOOKMARK_SERVER_CONTINUATION",service.state(PersonalContentKind.BOOKMARKS).getItems().size()==35);
+    edt(()->{pb.selectKind(PersonalContentKind.BOOKMARKS);((JComboBox<?>)field(pa,"searchScope")).setSelectedIndex(0);JTextField f=(JTextField)field(pa,"filter");f.setText("Bookmark 34");f.postActionEvent();return null;});
+    await("remote bookmark match beyond first page",()->service.state(PersonalContentKind.BOOKMARKS,"Bookmark 34").getLoaded()&&!service.state(PersonalContentKind.BOOKMARKS,"Bookmark 34").getLoading()&&rows(pa).getModel().getSize()==1);
+    check("REMOTE_SEARCH_FINDS_UNLOADED_BOOKMARK",edt(()->rows(pa).getModel().getElementAt(0).getTitle().equals("Bookmark 34")));
+    check("WINDOW_SEARCHES_HAVE_INDEPENDENT_RESULTS",edt(()->rows(pb).getModel().getSize()==35));
+    edt(()->{((JTextField)field(pa,"filter")).setText("");rows(pa).setSelectedIndex(0);return null;});
+    await("remote search cleared",()->rows(pa).getModel().getSize()==35);
+    evaluate(reader,"(window.bookmarkBody=document.querySelector('#floor-2 .post-content'),{ok:true})");
+    edt(()->{((JButton)field(pa,"editBookmark")).doClick();return null;});
+    await("native bookmark dialog",()->bookmarkWindow()!=null);Window bookmarkDialog=edt(PersonalIdeAcceptance::bookmarkWindow);
+    edt(()->{for(Project p:projects)WindowManager.getInstance().getFrame(p).setAlwaysOnTop(false);bookmarkDialog.setSize(460,330);bookmarkDialog.setAlwaysOnTop(true);bookmarkDialog.toFront();bookmarkDialog.requestFocus();return null;});
+    await("bookmark dialog in foreground",bookmarkDialog::isActive);Thread.sleep(500);
+    Point dialogPoint=edt(bookmarkDialog::getLocationOnScreen);Dimension dialogSize=edt(bookmarkDialog::getSize);
+    ImageIO.write(new Robot().createScreenCapture(new Rectangle(dialogPoint,dialogSize)),"png",output.resolve("bookmark-editor.png").toFile());
+    check("NATIVE_BOOKMARK_FIELDS_VISIBLE",edt(()->named(bookmarkDialog,"bookmark-name").isShowing()&&named(bookmarkDialog,"bookmark-reminder-enabled").isShowing()&&saveButton(bookmarkDialog).isShowing()));
+    edt(()->{((JTextField)named(bookmarkDialog,"bookmark-name")).setText("Managed bookmark");((JCheckBox)named(bookmarkDialog,"bookmark-reminder-enabled")).doClick();
+      ((JTextField)named(bookmarkDialog,"bookmark-reminder-time")).setText(java.time.LocalDateTime.now().plusDays(1).format(java.time.format.DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm")));return null;});
+    click(edt(()->saveButton(bookmarkDialog)));await("bookmark saved",()->!bookmarkDialog.isShowing()&&fixture.bookmarkWrites.get()==1);
+    await("both bookmark lists updated",()->rows(pa).getModel().getElementAt(0).getBookmark().getName().equals("Managed bookmark")&&rows(pb).getModel().getElementAt(0).getBookmark().getName().equals("Managed bookmark"));
+    check("BOOKMARK_POLICY_PRESERVED",fixture.savedBookmarkPolicy==0&&fixture.bookmarkReminder!=null);
+    check("BOOKMARK_UPDATES_BOTH_PROJECT_WINDOWS",edt(()->rows(pa).getModel().getSize()==30&&rows(pb).getModel().getSize()==30));
+    check("READER_BOOKMARK_PATCH_PRESERVES_BODY",evaluate(reader,"({ok:window.bookmarkBody===document.querySelector('#floor-2 .post-content')})").get("ok").getAsBoolean());
+    edt(()->{rows(pa).setSelectedIndex(0);((JButton)field(pa,"editBookmark")).doClick();return null;});
+    await("native bookmark dialog again",()->bookmarkWindow()!=null);Window clearDialog=edt(PersonalIdeAcceptance::bookmarkWindow);
+    edt(()->{((JCheckBox)named(clearDialog,"bookmark-reminder-enabled")).doClick();return null;});click(edt(()->saveButton(clearDialog)));
+    await("reminder cleared",()->!clearDialog.isShowing()&&fixture.bookmarkWrites.get()==2&&fixture.bookmarkReminder==null);
+    check("BOOKMARK_REMINDER_CAN_BE_CLEARED",fixture.savedBookmarkPolicy==0);
+    var bookmark=service.state(PersonalContentKind.BOOKMARKS).getItems().get(0).getBookmark();
+    var deleted=BookmarkService.Companion.getInstance().delete(bookmark,SessionEpoch.INSTANCE.getCurrent(),()->true);
+    check("BOOKMARK_DELETE_CONFIRMED",deleted.getError()==null);
+    await("deleted bookmark removed in both projects",()->service.state(PersonalContentKind.BOOKMARKS).getItems().stream().noneMatch(item->item.getKey().equals("bookmark:1"))&&rows(pa).getModel().getSize()==30&&rows(pb).getModel().getSize()==30);
+    check("DELETED_BOOKMARK_DOES_NOT_REAPPEAR",service.state(PersonalContentKind.BOOKMARKS).getItems().stream().noneMatch(item->item.getKey().equals("bookmark:1")));
+    evaluate(reader,"(document.querySelector('.topic-reader-tools summary').click(),[...document.querySelectorAll('.topic-reader-tools button')].find(b=>b.textContent==='我的书签').click(),{ok:true})");
+    await("reader bookmark entry selects personal module",()->a.getPersonalView()&&pa.getKind()==PersonalContentKind.BOOKMARKS&&personalButton.isSelected());
+    check("READER_BOOKMARK_ENTRY_USES_PERSONAL_CENTER",edt(()->a.getPersonalView()&&pa.getKind()==PersonalContentKind.BOOKMARKS));
     fixture.hold("/user_actions.json");edt(()->{pa.selectKind(PersonalContentKind.REPLIES);service.refresh(PersonalContentKind.REPLIES);return null;});check("TAB_REFRESH_PENDING",fixture.entered.await(10,TimeUnit.SECONDS));
     edt(()->{pa.selectKind(PersonalContentKind.BOOKMARKS);return null;});fixture.unblock();settled(PersonalContentKind.REPLIES);
     check("LATE_TAB_RESULT_CANNOT_REPLACE_ACTIVE_LIST",edt(()->pa.getKind()==PersonalContentKind.BOOKMARKS&&rows(pa).getModel().getElementAt(0).getKey().startsWith("bookmark:")));
@@ -271,8 +340,8 @@ public final class PersonalIdeAcceptance implements ApplicationStarter {
     check("SIGNED_OUT_ENTRY_PROMPTS_WITHOUT_READ",edt(()->((JTextArea)field(pa,"status")).getText().contains("登录后")&&fixture.pages.get()==signedOutPages));
     cookies.injectCookie("_t","synthetic-reconfirmed-account","linux.do");
     edt(()->{auth.setCurrentUserDirectly(GSON.fromJson("{\"id\":8,\"username\":\"fixture\"}",UserInfo.class));return null;});
-    await("confirmed account current tab loads",()->service.state(PersonalContentKind.TOPICS).getLoaded());
-    check("CONFIRMED_LOGIN_LOADS_ONLY_CURRENT_TAB",!service.state(PersonalContentKind.REPLIES).getLoaded()&&!service.state(PersonalContentKind.BOOKMARKS).getLoaded()&&!service.state(PersonalContentKind.DRAFTS).getLoaded());
-    check("NO_REAL_OR_SIMULATED_WRITES",fixture.writes.get()==0);report.println("REAL_FORUM_WRITES=0");
+    await("confirmed account current tabs load",()->service.state(PersonalContentKind.TOPICS).getLoaded()&&service.state(PersonalContentKind.BOOKMARKS).getLoaded());
+    check("CONFIRMED_LOGIN_LOADS_ONLY_CURRENT_TABS",pa.getKind()==PersonalContentKind.TOPICS&&pb.getKind()==PersonalContentKind.BOOKMARKS&&!service.state(PersonalContentKind.REPLIES).getLoaded()&&!service.state(PersonalContentKind.DRAFTS).getLoaded());
+    check("ONLY_EXPECTED_MEMORY_BOOKMARK_WRITES",fixture.writes.get()==0&&fixture.bookmarkWrites.get()==3);report.println("REAL_FORUM_WRITES=0");
   }
 }

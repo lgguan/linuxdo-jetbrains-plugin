@@ -28,7 +28,7 @@ class TopicListFilterTest {
     }
     @Test fun `every list type retains category tag and pagination`() {
         for (filter in TopicFilter.entries) {
-            val name = if (filter in setOf(TopicFilter.TOP, TopicFilter.HOT)) "top" else filter.key
+            val name = filter.key
             for (category in listOf(null, 4)) for (tag in listOf(null, "中文 & C++ / #")) {
                 val url = DiscourseUrls.topicList("https://linux.do", filter, "dev", category, 3, tag).toHttpUrl()
                 assertEquals("3", url.queryParameter("page"))
@@ -39,7 +39,7 @@ class TopicListFilterTest {
                     else -> listOf("$name.json")
                 }
                 assertEquals(expected, url.pathSegments)
-                assertEquals(when(filter) { TopicFilter.TOP -> "weekly"; TopicFilter.HOT -> "daily"; else -> null }, url.queryParameter("period"))
+                assertEquals(if(filter == TopicFilter.TOP) "weekly" else null, url.queryParameter("period"))
             }
         }
         assertEquals("/c/4/l/unread.json", DiscourseUrls.topicList("https://linux.do", TopicFilter.UNREAD, null, 4).toHttpUrl().encodedPath)

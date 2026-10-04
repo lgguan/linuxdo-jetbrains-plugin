@@ -120,6 +120,22 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
         { key, id, result -> jbCefBrowser?.cefBrowser?.executeJavaScript(
             "window.linuxDoReaderResult && window.linuxDoReaderResult(${com.google.gson.Gson().toJson(key)},${com.google.gson.Gson().toJson(id)},${result});", "", 0) }) }
     private var editorSelected = false
+    private val pendingBookmarkChanges = mutableMapOf<Long, com.lgguan.linuxdo.plugin.service.BookmarkChange>()
+    private fun applyPendingBookmarks() {
+        if(disposed || project.isDisposed || !editorSelected || !isShowing || com.lgguan.linuxdo.plugin.service.LinuxDoBossKeyService.getInstance(project).isHidden) return
+        val current = currentTopic ?: return
+        val changes = current.postStream.posts.mapNotNull { post ->
+            val event = pendingBookmarkChanges[post.id]?.takeIf { it.epoch == readingVersion && it.epoch == com.lgguan.linuxdo.plugin.net.SessionEpoch.current } ?: return@mapNotNull null
+            val fresh = event.post ?: return@mapNotNull null
+            post.copy(bookmarked = fresh.bookmarked, bookmarkId = fresh.bookmarkId, bookmarkName = fresh.bookmarkName,
+                bookmarkReminderAt = fresh.bookmarkReminderAt, bookmarkAutoDeletePreference = fresh.bookmarkAutoDeletePreference)
+        }
+        pendingBookmarkChanges.clear()
+        if(changes.isEmpty()) return
+        currentTopic = current.copy(postStream = current.postStream.copy(posts = current.postStream.posts.map { post -> changes.firstOrNull { it.id == post.id } ?: post }))
+        val html = com.lgguan.linuxdo.plugin.theme.TopicDocumentRenderer.buildPostFragment(current, changes, LinuxDoSettingsState.getInstance())
+        jbCefBrowser?.cefBrowser?.executeJavaScript("window.linuxDoPage?.key === ${com.google.gson.Gson().toJson(pageKey)} && window.linuxDoPagination?.patch(${com.google.gson.Gson().toJson(html)});", "", 0)
+    }
     private var readingScroll = -1L
     private var lastSyncStatus: String? = null
     private val readingTimer = javax.swing.Timer(1000) {
@@ -140,6 +156,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
 
     fun setSelected(selected: Boolean) {
         editorSelected = selected
+        if(selected) applyPendingBookmarks()
         if (selected && isShowing) jbCefBrowser?.component?.requestFocusInWindow()
         if (!selected) {
             finishOpen(TopicOpenResult.CANCELLED)
@@ -161,6 +178,13 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
     init {
         border = JBUI.Borders.empty()
         setupViewer()
+        com.lgguan.linuxdo.plugin.service.BookmarkService.getInstance().addListener(listenerLifetime) { event ->
+            val id = event.postId
+            if(!disposed && !project.isDisposed && event.epoch == readingVersion && id != null && currentTopic?.postStream?.posts?.any { it.id == id } == true) {
+                pendingBookmarkChanges[id] = event; applyPendingBookmarks()
+            }
+        }
+        addHierarchyListener { if(isShowing) applyPendingBookmarks() }
         object : com.intellij.openapi.project.DumbAwareAction("刷新回复") {
             override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
                 refreshReplies()
