@@ -61,6 +61,12 @@ class LinuxDoBrowser(val runtime: IsolatedCefRuntime = IsolatedCefRuntime.get(),
         preferredSize = Dimension(1000, 720)
         minimumSize = Dimension(0, 0)
         isFocusable = true
+        // Swing otherwise consumes Tab before our key listener can forward it to Chromium.
+        // Leave other traversal keys unchanged so IDE shortcuts retain their existing behavior.
+        setFocusTraversalKeys(KeyboardFocusManager.FORWARD_TRAVERSAL_KEYS,
+            getFocusTraversalKeys(KeyboardFocusManager.FORWARD_TRAVERSAL_KEYS) - AWTKeyStroke.getAWTKeyStroke(KeyEvent.VK_TAB, 0))
+        setFocusTraversalKeys(KeyboardFocusManager.BACKWARD_TRAVERSAL_KEYS,
+            getFocusTraversalKeys(KeyboardFocusManager.BACKWARD_TRAVERSAL_KEYS) - AWTKeyStroke.getAWTKeyStroke(KeyEvent.VK_TAB, InputEvent.SHIFT_DOWN_MASK))
         enableInputMethods(true)
     }
     val rawBrowser: Any

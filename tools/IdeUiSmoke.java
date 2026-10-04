@@ -52,6 +52,7 @@ public class IdeUiSmoke implements ApplicationStarter {
       report = new PrintWriter(Files.newBufferedWriter(output.resolve("result.txt")), true);
       project = ProjectManager.getInstance().getDefaultProject();
       if (Boolean.getBoolean("linuxdo.showcase")) showcase();
+      else if (Boolean.getBoolean("linuxdo.browser.keyboard.only")) browserKeyboard();
       else if (Boolean.getBoolean("linuxdo.reader.only")) reader();
       else if (System.getProperty("linuxdo.draft.bridge") == null) run(); else runLive();
       report.println("IDE_UI_PASS=true");
@@ -1200,6 +1201,71 @@ public class IdeUiSmoke implements ApplicationStarter {
     edt(() -> { text(blank).append(BODY); SessionEpoch.INSTANCE.advance(); environment.listeners.forEach(Function0::invoke); return null; });
     Thread.sleep(2200); check("TOPIC_ACCOUNT_SWITCH_STOPS_SYNC",fresh.saves==0 && !okEnabled(blank));
     edt(() -> { blank.close(DialogWrapper.CANCEL_EXIT_CODE); return null; });
+  }
+  private static void browserKeyboard() throws Exception {
+    LinuxDoSettingsState.Companion.getInstance().setEnableNotificationPolling(false);
+    var runtime=com.lgguan.linuxdo.plugin.net.IsolatedCefRuntime.Companion.get();
+    var browser=edt(()->new LinuxDoBrowser(runtime,false));
+    var query=LinuxDoJSQuery.Companion.create(browser,true);
+    BlockingQueue<String> replies=new LinkedBlockingQueue<>();
+    query.addHandler(value->{if(value.startsWith("probe:"))replies.add(value.substring(6));return null;});
+    var ready=new CountDownLatch(1);
+    browser.getJbCefClient().addLoadHandler(new org.cef.handler.CefLoadHandlerAdapter(){
+      public void onLoadEnd(org.cef.browser.CefBrowser b,org.cef.browser.CefFrame frame,int status){if(frame.isMain()&&status==200)ready.countDown();}
+    },browser.getCefBrowser());
+    browser.loadHTML("<!doctype html><html><body style='padding:24px'><label>Username <input id='username'></label>"
+      +"<label>Password <input id='password' type='password'></label><button id='login' type='button'>Login</button></body></html>");
+    var before=new JTextField("External field");
+    var after=new JButton("External action");
+    DialogWrapper dialog=edt(()->new DialogWrapper(project,false){
+      {setTitle("Embedded browser keyboard check");setModal(false);init();}
+      protected JComponent createCenterPanel(){
+        JPanel panel=new JPanel(new BorderLayout(0,8));panel.add(before,BorderLayout.NORTH);
+        panel.add(browser.getComponent(),BorderLayout.CENTER);panel.add(after,BorderLayout.SOUTH);
+        panel.setPreferredSize(new Dimension(800,360));return panel;
+      }
+    });
+    try {
+      edt(()->{dialog.show();dialog.getWindow().setLocation(100,100);dialog.getWindow().setAlwaysOnTop(true);
+        dialog.getWindow().toFront();dialog.getWindow().requestFocus();return null;});
+      check("LOCAL_LOGIN_FORM_READY",ready.await(25,TimeUnit.SECONDS));
+      JsonObject point=evaluate(browser,query,replies,"(()=>{const r=document.getElementById('username').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+      Point origin=edt(()->browser.getComponent().getLocationOnScreen());
+      Robot keys=new Robot();keys.setAutoDelay(80);
+      keys.mouseMove(origin.x+point.get("x").getAsInt(),origin.y+point.get("y").getAsInt());
+      keys.mousePress(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);keys.mouseRelease(java.awt.event.InputEvent.BUTTON1_DOWN_MASK);keys.waitForIdle();
+      await("Swing browser focus",()->browser.getComponent().isFocusOwner());
+      awaitBrowserCondition(browser,query,replies,"document.activeElement.id==='username'","USERNAME_FOCUSED");
+      for(int code:new int[]{java.awt.event.KeyEvent.VK_1,java.awt.event.KeyEvent.VK_2,java.awt.event.KeyEvent.VK_3}){keys.keyPress(code);keys.keyRelease(code);}
+      awaitBrowserCondition(browser,query,replies,"document.getElementById('username').value==='123'","PHYSICAL_USERNAME_INPUT");
+      keys.keyPress(java.awt.event.KeyEvent.VK_TAB);keys.keyRelease(java.awt.event.KeyEvent.VK_TAB);keys.waitForIdle();
+      awaitBrowserCondition(browser,query,replies,"document.activeElement.id==='password'","TAB_USERNAME_TO_PASSWORD");
+      check("TAB_RETAINS_BROWSER_FOCUS",edt(()->browser.getComponent().isFocusOwner()));
+      for(int code:new int[]{java.awt.event.KeyEvent.VK_4,java.awt.event.KeyEvent.VK_5,java.awt.event.KeyEvent.VK_6}){keys.keyPress(code);keys.keyRelease(code);}
+      awaitBrowserCondition(browser,query,replies,"document.getElementById('password').value==='456'","PHYSICAL_PASSWORD_INPUT");
+      keys.keyPress(java.awt.event.KeyEvent.VK_SHIFT);keys.keyPress(java.awt.event.KeyEvent.VK_TAB);
+      keys.keyRelease(java.awt.event.KeyEvent.VK_TAB);keys.keyRelease(java.awt.event.KeyEvent.VK_SHIFT);keys.waitForIdle();
+      awaitBrowserCondition(browser,query,replies,"document.activeElement.id==='username'","SHIFT_TAB_PASSWORD_TO_USERNAME");
+      keys.keyPress(java.awt.event.KeyEvent.VK_TAB);keys.keyRelease(java.awt.event.KeyEvent.VK_TAB);keys.waitForIdle();
+      awaitBrowserCondition(browser,query,replies,"document.activeElement.id==='password'","REPEATED_TAB_TO_PASSWORD");
+      keys.keyPress(java.awt.event.KeyEvent.VK_TAB);keys.keyRelease(java.awt.event.KeyEvent.VK_TAB);keys.waitForIdle();
+      awaitBrowserCondition(browser,query,replies,"document.activeElement.id==='login'","TAB_TO_PAGE_BUTTON");
+      edt(()->{before.requestFocusInWindow();return null;});await("external input focus",before::isFocusOwner);
+      keys.keyPress(java.awt.event.KeyEvent.VK_TAB);keys.keyRelease(java.awt.event.KeyEvent.VK_TAB);keys.waitForIdle();
+      await("external Tab enters browser",()->browser.getComponent().isFocusOwner());check("EXTERNAL_TAB_TRAVERSAL_PRESERVED",true);
+      edt(()->{after.requestFocusInWindow();return null;});await("external action focus",after::isFocusOwner);
+      keys.keyPress(java.awt.event.KeyEvent.VK_SHIFT);keys.keyPress(java.awt.event.KeyEvent.VK_TAB);
+      keys.keyRelease(java.awt.event.KeyEvent.VK_TAB);keys.keyRelease(java.awt.event.KeyEvent.VK_SHIFT);keys.waitForIdle();
+      await("external Shift+Tab enters browser",()->browser.getComponent().isFocusOwner());check("EXTERNAL_SHIFT_TAB_TRAVERSAL_PRESERVED",true);
+      screenshot(dialog,"browser-keyboard");report.println("TOTAL_CHECKS="+checks.size());
+    } finally {
+      edt(()->{dialog.close(DialogWrapper.CANCEL_EXIT_CODE);return null;});query.dispose();browser.dispose();
+    }
+  }
+  private static void awaitBrowserCondition(LinuxDoBrowser browser,LinuxDoJSQuery query,BlockingQueue<String> replies,String condition,String name)throws Exception {
+    long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+    while(System.nanoTime()<deadline){if(evaluate(browser,query,replies,"({ok:"+condition+"})").get("ok").getAsBoolean()){check(name,true);return;}Thread.sleep(50);}
+    throw new AssertionError(name);
   }
   private static JsonObject evaluate(LinuxDoBrowser browser, LinuxDoJSQuery query, BlockingQueue<String> replies, String expression) throws Exception {
     replies.clear();

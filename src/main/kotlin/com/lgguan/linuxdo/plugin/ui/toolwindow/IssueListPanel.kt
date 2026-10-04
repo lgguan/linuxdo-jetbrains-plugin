@@ -67,10 +67,19 @@ class IssueListPanel(
     private val contentViews = JPanel(CardLayout())
     private val forumContent = JPanel(BorderLayout())
     private val forumControls = JPanel()
+    private val forumViewButton = ModuleNavigationButton("论坛", AllIcons.Toolwindows.ToolWindowMessages).apply {
+        isSelected = true
+        addActionListener { selectPersonalView(false) }
+    }
+    private val personalViewButton = ModuleNavigationButton("我的", AllIcons.General.User).apply {
+        addActionListener { selectPersonalView(true) }
+    }
     var personalView = false
         private set
     fun selectPersonalView(value: Boolean) {
         personalView = value
+        forumViewButton.isSelected = !value
+        personalViewButton.isSelected = value
         forumControls.isVisible = !value
         (contentViews.layout as CardLayout).show(contentViews, if(value) "MY" else "FORUM")
         personalContentPanel.setActive(value)
@@ -304,9 +313,17 @@ class IssueListPanel(
         val headerStack = JPanel()
         headerStack.layout = BoxLayout(headerStack, BoxLayout.Y_AXIS)
 
-        // Row 1: Auth / User profile and utilities; create/refresh live in the tool window title.
+        // Row 1: Module navigation, auth / user profile and utilities.
         val row1 = JPanel(BorderLayout(4, 0))
         val authBox = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0))
+        val moduleNavigation = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(2), 0)).apply {
+            ButtonGroup().apply { add(forumViewButton); add(personalViewButton) }
+            add(forumViewButton)
+            add(personalViewButton)
+            border = JBUI.Borders.emptyRight(4)
+        }
+        authBox.add(moduleNavigation)
+        authBox.add(JSeparator(SwingConstants.VERTICAL).apply { preferredSize = JBUI.size(1, 20) })
         authBox.add(loginButton)
         authBox.add(userLabel)
         authBox.add(notificationButton)
@@ -349,13 +366,6 @@ class IssueListPanel(
 
         headerStack.add(row1)
         headerStack.add(Box.createVerticalStrut(JBUI.scale(4)))
-        val views = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
-        val forum = JToggleButton("论坛", true)
-        val mine = JToggleButton("我的")
-        ButtonGroup().apply { add(forum); add(mine) }
-        forum.addActionListener { selectPersonalView(false) }
-        mine.addActionListener { selectPersonalView(true) }
-        views.add(forum); views.add(mine); headerStack.add(views)
         forumControls.layout = BoxLayout(forumControls, BoxLayout.Y_AXIS)
         forumControls.add(row2)
         forumControls.add(Box.createVerticalStrut(JBUI.scale(4)))

@@ -176,10 +176,20 @@ public final class PersonalIdeAcceptance implements ApplicationStarter {
     var a=listPanel(first);var b=listPanel(second);var pa=a.getPersonalContentPanel();var pb=b.getPersonalContentPanel();var service=PersonalContentService.Companion.getInstance();
     check("TWO_REAL_PROJECT_FRAMES",first.isOpen()&&second.isOpen()&&WindowManager.getInstance().getFrame(first)!=WindowManager.getInstance().getFrame(second));
     await("forum row",()->((JList<?>)field(a,"topicList")).getModel().getSize()>0);
+    var forumButton=edt(()->(JToggleButton)field(a,"forumViewButton"));
+    var personalButton=edt(()->(JToggleButton)field(a,"personalViewButton"));
+    check("MODULE_ICONS_HAVE_ACCESSIBLE_NAMES",edt(()->forumButton.getIcon()!=null&&personalButton.getIcon()!=null
+      &&(forumButton.getText()==null||forumButton.getText().isEmpty())&&(personalButton.getText()==null||personalButton.getText().isEmpty())
+      &&forumButton.getAccessibleContext().getAccessibleName().equals("论坛")&&personalButton.getAccessibleContext().getAccessibleName().equals("我的")));
+    check("FORUM_SELECTED_BY_DEFAULT",edt(()->forumButton.isSelected()&&!personalButton.isSelected()&&!a.getPersonalView()));
+    shot(first,"module-forum");
     edt(()->{((JList<?>)field(a,"topicList")).setSelectedIndex(0);((JTextField)field(a,"searchField")).setText("retain query");return null;});
-    fixture.hold("/user_actions.json");int before=fixture.pages.get();edt(()->{a.selectPersonalView(true);b.selectPersonalView(true);return null;});
+    fixture.hold("/user_actions.json");int before=fixture.pages.get();front(first);click(personalButton);edt(()->{b.selectPersonalView(true);return null;});
+    check("PERSONAL_CLICK_SYNCS_SELECTION_AND_CONTENT",edt(()->!forumButton.isSelected()&&personalButton.isSelected()
+      &&a.getPersonalView()&&pa.isVisible()&&!((JPanel)field(a,"forumControls")).isVisible()));
     check("PERSONAL_READ_STARTED",fixture.entered.await(10,TimeUnit.SECONDS));Thread.sleep(200);check("TWO_WINDOWS_ONE_PAGE_REQUEST",fixture.pages.get()==before+1);
     fixture.unblock();settled(PersonalContentKind.TOPICS);check("TOPICS_FIRST_PAGE",service.state(PersonalContentKind.TOPICS).getItems().size()==30);
+    shot(first,"module-personal");
     edt(()->{rows(pa).setSelectedIndex(12);rows(pa).ensureIndexIsVisible(12);return null;});
     edt(()->{service.loadMore(PersonalContentKind.TOPICS);return null;});settled(PersonalContentKind.TOPICS);check("TOPICS_SECOND_PAGE",service.state(PersonalContentKind.TOPICS).getItems().size()==60);
     fixture.failure=403;edt(()->{service.loadMore(PersonalContentKind.TOPICS);return null;});settled(PersonalContentKind.TOPICS);
@@ -190,6 +200,8 @@ public final class PersonalIdeAcceptance implements ApplicationStarter {
     edt(()->{service.refresh(PersonalContentKind.TOPICS);return null;});settled(PersonalContentKind.TOPICS);
     check("REFRESH_SELECTION_AND_SCROLL",edt(()->rows(pa).getSelectedIndex()==12&&((JScrollPane)field(pa,"scroll")).getViewport().getViewPosition().y==y));
     edt(()->{a.selectPersonalView(false);return null;});check("FORUM_FILTER_AND_SELECTION_RETAINED",edt(()->((JTextField)field(a,"searchField")).getText().equals("retain query")&&((JList<?>)field(a,"topicList")).getSelectedIndex()==0));
+    check("PROGRAMMATIC_MODULE_SWITCH_SYNCS_HIGHLIGHT",edt(()->forumButton.isSelected()&&!personalButton.isSelected()
+      &&forumButton.getToolTipText().contains("当前模块")&&((JPanel)field(a,"forumControls")).isVisible()));
     edt(()->{a.selectPersonalView(true);pa.selectKind(PersonalContentKind.REPLIES);return null;});settled(PersonalContentKind.REPLIES);check("SAME_TOPIC_MULTIPLE_REPLIES",service.state(PersonalContentKind.REPLIES).getItems().size()==30);
     edt(()->{rows(pa).setSelectedIndex(0);rows(pa).getActionMap().get("open-personal").actionPerformed(null);return null;});
     await("reply missing floor resolved",()->editor(first,990101)!=null);

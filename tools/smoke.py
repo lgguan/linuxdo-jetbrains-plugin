@@ -141,6 +141,8 @@ def host(args):
         vm_args.append("-Dlinuxdo.showcase=true")
     if getattr(args, "reader_only", False):
         vm_args.append("-Dlinuxdo.reader.only=true")
+    if getattr(args, "browser_keyboard_only", False):
+        vm_args.append("-Dlinuxdo.browser.keyboard.only=true")
     if getattr(args, "composer_only", False):
         vm_args.append("-Dlinuxdo.composer.only=true")
     if getattr(args, "system_ime", False):
@@ -179,6 +181,7 @@ def main():
             sub.add_argument("--output-base", help="Short directory for isolated IDE runs, avoiding Windows path limits")
             sub.add_argument("--native", action="store_true")
         if mode == "ui":
+            sub.add_argument("--browser-keyboard-only", action="store_true", help="Verify physical Tab navigation in an embedded browser using a local login form")
             sub.add_argument("--system-ime", action="store_true", help="Also verify installed Chinese input method with physical candidate-confirmation keys")
             sub.add_argument("--composer-only", action="store_true", help="Run existing browsing/composer assertions separately from reader focus checks")
             sub.add_argument("--editor-only", action="store_true", help="Exercise Markdown helpers in three production dialogs and two IDEA projects using memory HTTP")
