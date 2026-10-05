@@ -19,9 +19,9 @@ class LinuxDoSettingsState : PersistentStateComponent<LinuxDoSettingsState> {
     var customDohUrl: String = ""
     var customBootstrapIp: String = ""
 
-    var hideAvatars: Boolean = true
-    var foldImages: Boolean = true
-    var categoryNamespaceFormat: Boolean = true
+    var hideAvatars: Boolean = false
+    var foldImages: Boolean = false
+    var categoryNamespaceFormat: Boolean = false
     var autoJumpToLastReadFloor: Boolean = true
     var autoReportReadTimings: Boolean = true
     var readingFontSize: Int = 0

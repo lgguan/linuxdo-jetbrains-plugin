@@ -30,6 +30,40 @@ class BoostFeatureTest {
     }
     private fun service(transport: TopicOperationTransport, session: (Long) -> Unit = {}) = BoostService(transport,{7},session,ReaderWriteGate({0},{}))
 
+    @Test fun `Boost avatars follow settings and retain the profile control in replacement fragments`() {
+        val boost = mine.copy(user=BoostUser(id=7,username="reader",avatarTemplate="/user_avatar/linux.do/reader/{size}/1.png"))
+        val topic = TopicDetailResponse(1,"Test",postStream=PostStream(listOf(post)))
+        val settings = LinuxDoSettingsState()
+        for (hidden in listOf(false, true, false)) {
+            settings.hideAvatars = hidden
+            val doc = Jsoup.parse(TopicDocumentRenderer.buildPostFragment(topic,listOf(post.copy(boosts=listOf(boost))),settings,"reader"))
+            val control = doc.selectFirst(".boost-user[data-reader-author=reader]")!!
+            assertEquals("button", control.tagName())
+            assertEquals("查看 @reader 的资料", control.attr("aria-label"))
+            assertEquals(if(hidden) 0 else 1, control.select("img[data-user-avatar]").size)
+            val initial = control.selectFirst(".boost-initial")!!
+            assertEquals("r",initial.text())
+            assertEquals(!hidden,initial.hasAttr("hidden"))
+            if(!hidden) assertEquals("https://linux.do/user_avatar/linux.do/reader/24/1.png",control.selectFirst("img")!!.attr("src"))
+            else assertFalse(control.html().contains("user_avatar"))
+        }
+    }
+
+    @Test fun `Boost initials preserve Unicode and escape account text with missing avatar fallbacks`() {
+        val topic = TopicDetailResponse(1,"Test",postStream=PostStream(listOf(post)))
+        for ((username,expected) in listOf("Reader" to "R", "中文" to "中", "𐐀reader" to "𐐀", "<reader" to "<", "   " to "?", null to "?")) {
+            for(hidden in listOf(false,true)) {
+                val boost = mine.copy(user=BoostUser(id=7,username=username))
+                val doc = Jsoup.parse(TopicDocumentRenderer.buildPostFragment(topic,listOf(post.copy(boosts=listOf(boost))),LinuxDoSettingsState().apply{hideAvatars=hidden}))
+                assertTrue(doc.select(".boost-user img").isEmpty())
+                val initial = doc.selectFirst(".boost-initial")!!
+                assertEquals(expected,initial.text())
+                assertFalse(initial.hasAttr("hidden"))
+                assertTrue(initial.children().isEmpty())
+            }
+        }
+    }
+
     @Test fun `visible graphemes and valid shortcodes match forum boundaries`() {
         assertEquals(BoostText.Stats(1,0),BoostText.stats("e\u0301"))
         for(symbol in listOf("👨‍👩‍👧‍👦","👍🏻","🇨🇳","1️⃣","❤️")) assertEquals(BoostText.Stats(1,1),BoostText.stats(symbol),symbol)

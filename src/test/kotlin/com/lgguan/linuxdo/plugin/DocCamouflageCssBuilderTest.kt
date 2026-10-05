@@ -52,6 +52,7 @@ class DocCamouflageCssBuilderTest {
         val settings = LinuxDoSettingsState().apply {
             foldImages = true
             hideAvatars = true
+            categoryNamespaceFormat = true
         }
 
         val samplePost = Post(
@@ -446,7 +447,7 @@ class DocCamouflageCssBuilderTest {
             postStream = PostStream(posts = listOf(post))
         )
 
-        // 1. When hideAvatars = true (default)
+        // 1. When hideAvatars = true
         val settingsHidden = LinuxDoSettingsState().apply { hideAvatars = true }
         val htmlHidden = TopicDocumentRenderer.buildFullDocHtml(
             topic = topic,

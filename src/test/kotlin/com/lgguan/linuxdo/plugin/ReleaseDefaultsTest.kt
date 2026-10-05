@@ -14,6 +14,31 @@ import java.io.File
 class ReleaseDefaultsTest {
     private val endpoint = "https://ldh.ddd.oaifree.com/query-dns"
 
+    @Test fun `fresh and missing reading settings default to visible forum presentation`() {
+        for (state in listOf(LinuxDoSettingsState(), XmlSerializer.deserialize(Element("state"), LinuxDoSettingsState::class.java))) {
+            assertFalse(state.hideAvatars)
+            assertFalse(state.foldImages)
+            assertFalse(state.categoryNamespaceFormat)
+        }
+    }
+
+    @Test fun `explicit saved reading choices survive loading and serialization`() {
+        for (value in listOf(true, false)) {
+            val xml = Element("state")
+            for (name in listOf("hideAvatars", "foldImages", "categoryNamespaceFormat")) {
+                xml.addContent(Element("option").setAttribute("name", name).setAttribute("value", value.toString()))
+            }
+            val target = LinuxDoSettingsState()
+            target.loadState(XmlSerializer.deserialize(xml, LinuxDoSettingsState::class.java))
+            val restored = XmlSerializer.deserialize(XmlSerializer.serialize(target), LinuxDoSettingsState::class.java)
+            for (state in listOf(target, restored)) {
+                assertEquals(value, state.hideAvatars)
+                assertEquals(value, state.foldImages)
+                assertEquals(value, state.categoryNamespaceFormat)
+            }
+        }
+    }
+
     @Test fun `fresh settings and all browser platforms use LinuxDo DoH`() {
         val config = LinuxDoSettingsState().toNetworkConfig()
         assertEquals(setOf("LINUXDO", "CUSTOM", "DISABLED"), Constants.DohProvider.values().map { it.name }.toSet())

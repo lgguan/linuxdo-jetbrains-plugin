@@ -6,6 +6,23 @@
   let sequence = 0, activePanel = null, panelVersion = 0;
   const requests = new Map(), pendingPosts = new Set();
   const toast = message => window.showDocToast?.(message);
+  function avatarInitial(username) {
+    return typeof username==='string' && username.trim() ? Array.from(username)[0] : '?';
+  }
+  function avatarFailed(avatar) {
+    const fallback=avatar.nextElementSibling;
+    if(!fallback?.matches('.boost-initial'))return;
+    fallback.hidden=false;avatar.remove();
+  }
+  // Capture also covers images inserted by pagination and operation patches.
+  document.addEventListener('error',e=>{
+    if(e.target.matches?.('img[data-user-avatar]'))avatarFailed(e.target);
+  },true);
+  function checkAvatars(root) {
+    root.querySelectorAll('img[data-user-avatar]').forEach(avatar=>{
+      if(avatar.complete && !avatar.naturalWidth)avatarFailed(avatar);
+    });
+  }
   function call(action, postId, input = {}) {
     return new Promise(resolve => {
       const id = String(++sequence);
@@ -410,7 +427,11 @@
     const result=await call('profile',0,{username});if(version!==panelVersion)return;
     if(result.error){status.textContent=result.error;box.append(button('重新读取',()=>showProfile(username)));return;}
     status.remove();const header=document.createElement('div');header.className='reader-user-card';
-    if(result.avatarUrl){const avatar=document.createElement('img');avatar.src=result.avatarUrl;avatar.alt='';header.append(avatar);}
+    const initial=document.createElement('span');initial.className='boost-avatar boost-initial';initial.setAttribute('aria-hidden','true');initial.textContent=avatarInitial(result.username ?? username);
+    if(!config.hideAvatars && result.avatarUrl){
+      const avatar=document.createElement('img');avatar.setAttribute('data-user-avatar','');avatar.alt='';initial.hidden=true;
+      header.append(avatar,initial);avatar.src=result.avatarUrl;
+    }else header.append(initial);
     const identity=document.createElement('strong');identity.textContent='@'+result.username+(result.name?' · '+result.name:'');header.append(identity);box.append(header);
     const labels={title:'称号',bio_cooked:'简介',created_at:'加入时间',last_seen_at:'最后活跃',trust_level:'信任等级',location:'位置',website:'网站'};
     Object.entries(labels).forEach(([key,label])=>{if(result[key]!==undefined&&result[key]!==null&&result[key]!==''){
@@ -468,7 +489,7 @@
       });
     });
   }
-  window.linuxDoPolls=polls;polls(document);
+  window.linuxDoPolls=polls;polls(document);checkAvatars(document);
   let pending=false;
-  new MutationObserver(()=>{if(pending)return;pending=true;requestAnimationFrame(()=>{pending=false;polls(document);});}).observe(document.querySelector('.doc-container'),{childList:true,subtree:true});
+  new MutationObserver(()=>{if(pending)return;pending=true;requestAnimationFrame(()=>{pending=false;polls(document);checkAvatars(document);});}).observe(document.querySelector('.doc-container'),{childList:true,subtree:true});
 })();

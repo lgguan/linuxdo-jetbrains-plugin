@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-05",
+  "version": "1.0.4",
+  "package": "build/distributions/linuxdo-jetbrains-plugin-1.0.4.zip",
+  "sha256": "f0ba6eb0f2c3256dfcd0e0ce0c713bc98c28ac9a4bc2d89d8a71b5f3d659185d",
+  "ide": "IU-262.10968.63",
+  "tests": {
+    "tests": 446,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "desktopTests": true,
+  "buildPlugin": "passed",
+  "verifyPlugin": "passed",
+  "pluginVerifier": "Compatible",
+  "cleanBuild": {
+    "passed": true,
+    "identicalPackage": true
+  },
+  "native": {
+    "reader": 94,
+    "realForumWrites": 0
+  },
+  "browserBoostActions": 41,
+  "compatibleBuilds": "262.*",
+  "nativePlatformsTested": [
+    "Windows x64"
+  ],
+  "marketplaceId": 34669,
+  "restartRequired": true,
+  "githubPublished": false,
+  "marketplaceUploaded": false
+}

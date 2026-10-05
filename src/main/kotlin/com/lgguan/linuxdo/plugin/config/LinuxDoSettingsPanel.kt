@@ -33,9 +33,9 @@ class LinuxDoSettingsPanel : com.intellij.openapi.Disposable {
     val mainPanel: JPanel
 
     // 1. Camouflage Mode
-    private val hideAvatarsCheckBox = JBCheckBox("隐藏用户头像 (移除所有头像图形，呈现纯净代码注释风格)", true)
-    private val foldImagesCheckBox = JBCheckBox("折叠正文图片为文档占位符 (转为 [Figure: ...] 注释，点击展开或放大)", true)
-    private val categoryNamespaceCheckBox = JBCheckBox("技术命名空间化版块分类 (例如将“开发调优”格式化为 dev.tuning)", true)
+    private val hideAvatarsCheckBox = JBCheckBox("隐藏用户头像 (正文隐藏头像，Boost 和用户资料使用账号首字母)", false)
+    private val foldImagesCheckBox = JBCheckBox("折叠正文图片为文档占位符 (转为 [Figure: ...] 注释，点击展开或放大)", false)
+    private val categoryNamespaceCheckBox = JBCheckBox("技术命名空间化版块分类 (例如将“开发调优”格式化为 dev.tuning)", false)
     private val autoJumpToLastReadFloorCheckBox = JBCheckBox("打开话题时自动跳转至上次阅读楼层 (自动记住历史进度并平滑定位)", true)
     private val autoReportTimingsCheckBox = JBCheckBox("自动向社区同步阅读进度与停留时长 (/topics/timings)", true)
     private val readingFont = javax.swing.JSpinner(javax.swing.SpinnerNumberModel(0,0,32,1))

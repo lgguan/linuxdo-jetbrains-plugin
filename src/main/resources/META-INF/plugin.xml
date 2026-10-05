@@ -25,6 +25,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>1.0.4</h3>
+<ul>
+<li>Hide user avatars, fold body images and technical category namespaces are now disabled by default. Explicitly saved settings are preserved; missing options use the new defaults.</li>
+<li>Hidden Boost and public profile avatars use account initials. Missing or failed avatar images also fall back to initials, with Unicode support and preserved case.</li>
+<li>Avatar controls retain profile access and keyboard navigation. Settings apply to open readers, pagination and partial updates while preserving the recorded reading floor.</li>
+<li>Clarified avatar settings and added a Linux Do friend link and default-reading documentation to the README.</li>
+</ul>
 <h3>1.0.3</h3>
 <ul>
 <li>Boost avatars open public user cards. Your own Boost shows only a trash icon; other Boosts use the topic's existing flag permissions without a request on expansion. Report forms check current permissions and submissions require confirmation with duplicate-submission protection.</li>

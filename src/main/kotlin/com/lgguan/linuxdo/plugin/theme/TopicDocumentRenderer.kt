@@ -927,7 +927,7 @@ object TopicDocumentRenderer {
                     <div class="post-content" data-source="${java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest((post.cooked + "\u0000" + post.raw.orEmpty()).toByteArray()))}">
                         ${ForumContent.render(ScrollableSourceBlocks.render(post.cooked, post.raw), settings.foldImages, post.id.toString(), "https://linux.do/t/${topic.id}/${post.postNumber}")}
                     </div>
-                    ${renderBoosts(post,currentUsername)}
+                    ${renderBoosts(post,currentUsername,settings.hideAvatars)}
                     <div class="floor-actions" aria-label="帖子操作">
                         $actionsHtml
                     </div>
@@ -1000,7 +1000,7 @@ object TopicDocumentRenderer {
 
     private fun boostEntry() = """<button type="button" class="action-link" data-post-command="boost" data-boost-open title="发送 Boost" aria-label="Boost">${ReaderIcons.svg("boost")}</button>"""
 
-    private fun renderBoosts(post: Post, currentUsername: String?): String {
+    private fun renderBoosts(post: Post, currentUsername: String?, hideAvatars: Boolean): String {
         val boosts = post.boosts
         if (boosts.isNullOrEmpty()) return ""
         val items = boosts.filterNotNull().mapNotNull { b ->
@@ -1012,9 +1012,16 @@ object TopicDocumentRenderer {
                 select("img:not(.emoji)").remove()
                 select("img").forEach { it.attr("src",normalizeUrl(it.attr("src"))) }
             }.body().html()
-            val avatar = b.user?.avatarTemplate?.replace("{size}","24")?.takeIf { it.isNotBlank() }?.let {
-                """<img class="boost-avatar" src="${escapeHtml(normalizeUrl(it))}" alt="" loading="lazy">"""
-            } ?: """<span class="boost-avatar boost-initial">${escapeHtml(b.getDisplayUsername().take(1))}</span>"""
+            val username = b.user?.username ?: b.username
+            val initial = username?.takeUnless { it.isBlank() }?.let {
+                String(Character.toChars(it.codePointAt(0)))
+            } ?: "?"
+            val avatarUrl = b.user?.avatarTemplate?.takeUnless { hideAvatars || it.isBlank() }
+                ?.replace("{size}","24")
+            val fallback = """<span class="boost-avatar boost-initial" aria-hidden="true"${if (avatarUrl != null) " hidden" else ""}>${escapeHtml(initial)}</span>"""
+            val avatar = avatarUrl?.let {
+                """<img class="boost-avatar" data-user-avatar src="${escapeHtml(normalizeUrl(it))}" alt="" loading="lazy">$fallback"""
+            } ?: fallback
             val own = currentUsername!=null && b.getDisplayUsername().equals(currentUsername,true)
             val delete = if (own && b.canDelete==true && b.id!=null)
                 """<button type="button" class="action-link boost-delete" data-boost-delete="${b.id}" title="删除自己的 Boost" aria-label="删除自己的 Boost">${ReaderIcons.svg("delete")}</button>""" else ""

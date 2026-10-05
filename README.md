@@ -30,13 +30,13 @@
 
 1.0.2 将楼层号和未读小蓝点移到楼层标题右侧，左侧头像紧邻用户名。小蓝点保留固定占位，标记已读后用户名与正文不移动。详见[楼层标题布局验收](docs/right-floor-metadata-verification.md)。
 
-上述 1.0.2 功能与修复已包含在当前 1.0.3 中。历史安装包检查见[1.0.2 发布验证](docs/release-1.0.2.md)。
+上述 1.0.2 功能与修复已包含在 1.0.3 及后续版本中。历史安装包检查见[1.0.2 发布验证](docs/release-1.0.2.md)。
 
 1.0.3 同时包含通知优化：全部／未读／已读状态筛选、每页 30 条与手动加载历史；类别仅筛选已加载内容。刷新保留选中项和滚动位置，失败可重试。角标使用账号计数，失败保留上次有效值并提示未更新。帖子正文显示且目标楼层定位成功后自动标读；网页通知可选中后手动标读，“账号全部标读”包含未加载通知。本站配置已核实 Boost 为 43，34 为指派。详见[通知验收记录](docs/notification-workflow-verification.md)。
 
 ## 界面预览
 
-当前版本为 **1.0.3**，包含个人内容集中入口、书签管理、通知闭环、Markdown 编辑和 Boost 举报及用户资料优化。[GitHub Release](https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/tag/v1.0.3) 已发布，[JetBrains Stable](https://plugins.jetbrains.com/plugin/34669-linux-do-api-docs-/versions/stable/1187229) 已审核通过。完整更新及发布状态见[更新记录](CHANGELOG.md)和[1.0.3 发布验证](docs/release-1.0.3.md)。
+当前版本为 **1.0.4**，三项阅读设置默认不勾选，Boost 和用户资料遵循隐藏头像设置并支持首字母回退。此前的个人内容集中入口、书签管理、通知闭环、Markdown 编辑和 Boost 举报功能继续保留。完整更新及发布状态见[更新记录](CHANGELOG.md)和[1.0.4 发布验证](docs/release-1.0.4.md)；历史发布见[1.0.3 发布验证](docs/release-1.0.3.md)。
 
 “论坛／我的”使用图标切换并高亮当前模块。“我的”提供话题、回复、书签和草稿四个页签，首次访问才读取，支持手动刷新与分页。话题、回复和草稿继续筛选已加载内容；书签默认搜索全部收藏，也可切换为本地筛选。草稿按实际键继续编辑，同键跨项目聚焦已有窗口；特殊类型使用网页入口。使用方法见[个人内容集中入口验收](docs/personal-content-verification.md)。内置浏览器登录页支持 Tab 和 Shift+Tab 在用户名、密码等控件间切换。
 
@@ -104,6 +104,8 @@
 
 在 Settings → Tools → Linux Do (API Docs) 中调整阅读、网络和通知选项。详细说明见[网络配置与诊断](docs/network-diagnostics.md)。
 
+“隐藏用户头像”“折叠正文图片”“技术命名空间化版块分类”默认不勾选，已有配置中明确保存的选择会保留。开启隐藏头像后，正文隐藏作者头像，Boost 和用户资料使用账号首字母；头像缺失或加载失败时也会显示首字母。
+
 ![插件设置：阅读选项、LinuxDo DoH、代理、通知与诊断](docs/images/settings.png)
 
 ## 开发与构建
@@ -168,3 +170,7 @@ python tools/clean-release-build.py
 干净目录构建工具导出当前源码（包括未提交修改），离线重新运行测试和打包，并对比工作区 ZIP 的 SHA-256。记录位于 `build/release-check/`，不会修改 Git 暂存区。它验证当前源码快照的可复现性；正式发布仍应将同一源码版本纳入版本控制。
 
 发布 ZIP 对比前使用上述全量构建命令，避免 Kotlin 增量缓存残留的内联字节码影响包内容；macOS/Linux 将 `.\gradlew.bat` 换成 `./gradlew`。
+
+## 友情链接
+
+- [Linux Do](https://linux.do)

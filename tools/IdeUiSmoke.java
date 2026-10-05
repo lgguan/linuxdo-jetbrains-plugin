@@ -1278,12 +1278,15 @@ public class IdeUiSmoke implements ApplicationStarter {
     return result;
   }
   private static void awaitReaderBridge(LinuxDoBrowser browser, LinuxDoJSQuery query, BlockingQueue<String> replies) throws Exception {
+    awaitReaderBridge(browser,query,replies,"!!window.intellijBridge&&document.querySelectorAll('.post-entry').length===2");
+  }
+  private static void awaitReaderBridge(LinuxDoBrowser browser, LinuxDoJSQuery query, BlockingQueue<String> replies,String condition) throws Exception {
     // A newly opened editor can still have an EDT render queued after its topic arrives.
     // Poll from the smoke worker so that native load and bridge callbacks can complete.
     replies.clear();
     long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
-    String script="(()=>{"+query.inject("'probe:'+JSON.stringify({ok:!!window.intellijBridge&&document.querySelectorAll('.post-entry').length===2})")+"})()";
     while(System.nanoTime()<deadline){
+      String script="(()=>{"+query.inject("'probe:'+JSON.stringify({ok:"+condition+"})")+"})()";
       browser.getCefBrowser().executeJavaScript(script,browser.getCefBrowser().getURL(),0);
       String value=replies.poll(100,TimeUnit.MILLISECONDS);
       if(value!=null&&JsonParser.parseString(value).getAsJsonObject().get("ok").getAsBoolean())return;
@@ -1452,7 +1455,7 @@ public class IdeUiSmoke implements ApplicationStarter {
       else if(request.method().equals("GET")&&path.equals("/discourse-boosts/boosts/4001")) {
         JsonObject boost=posts.get(1).getAsJsonObject().getAsJsonArray("boosts").get(0).getAsJsonObject().deepCopy();boost.addProperty("can_flag",false);response=boost.toString();
       }
-      else if(request.method().equals("GET")&&path.equals("/u/fixture_booster/card.json"))response="{\"user\":{\"username\":\"fixture_booster\",\"name\":\"示例用户\",\"title\":\"论坛成员\",\"trust_level\":2,\"bio_cooked\":\"<p>公开资料简介</p>\",\"created_at\":\"2025-01-01T00:00:00Z\"}}";
+      else if(request.method().equals("GET")&&path.equals("/u/fixture_booster/card.json"))response="{\"user\":{\"username\":\"fixture_booster\",\"avatar_template\":\"/user_avatar/linux.do/fixture_booster/{size}/fixture.png\",\"name\":\"示例用户\",\"title\":\"论坛成员\",\"trust_level\":2,\"bio_cooked\":\"<p>公开资料简介</p>\",\"created_at\":\"2025-01-01T00:00:00Z\"}}";
       else if(request.method().equals("POST")&&path.equals("/discourse-boosts/boosts/5001/flags")) {
         okio.Buffer body=new okio.Buffer();request.body().writeTo(body);JsonObject data=JsonParser.parseString(body.readUtf8()).getAsJsonObject();
         if(data.get("flag_type_id").getAsInt()!=6||!data.get("message").getAsString().equals("模拟举报说明")||data.get("take_action").getAsBoolean()||data.get("queue_for_review").getAsBoolean())throw new IOException("invalid Boost flag fixture payload");
@@ -1541,6 +1544,7 @@ public class IdeUiSmoke implements ApplicationStarter {
       } finally {edt(()->{settings.setReadingWidth(originalWidth);settings.fireSettingsChanged();return null;});}
       await("reading width restored",()->evaluate(browser,themeQuery,replies,"({ok:linuxDoPage.width==="+originalWidth+"})").get("ok").getAsBoolean());
       evaluate(browser,query,replies,"(()=>{getSelection().removeAllRanges();document.querySelector('#floor-1 details').open=false;return {ok:true}})()");
+      avatarSettingsAcceptance(panel,browser,query,replies);
       boostReaderAcceptance(panel,browser,query,replies,frame,boostSends,boostDeletes,rejectBoost,boostPayload);
       boostActionsAcceptance(browser,query,replies,frame,boostFlags,boostActionReads);
       check("IDE_CROSS_TOPIC_QUOTE_SHOWS_CONTEXT",evaluate(browser,query,replies,"(()=>{var original=window.intellijBridge.readerAction;var target=0;window.intellijBridge.readerAction=function(key,id,action,postId,input){target=input.topic;linuxDoReaderResult(key,id,{items:[{floor:5,author:'sample',text:'公开引用上下文'}]})};document.querySelector('aside[data-topic=\"2909396\"] .quote-controls').click();window.intellijBridge.readerAction=original;return {ok:target===2909396 && !!document.querySelector('.topic-reader-panel')}})()").get("ok").getAsBoolean());
@@ -1655,6 +1659,35 @@ public class IdeUiSmoke implements ApplicationStarter {
     report.println("READER_NETWORK_REQUESTS_BLOCKED=true");
     report.println("TOTAL_CHECKS=" + checks.size());
   }
+  private static void avatarSettingsAcceptance(DocViewerPanel panel,LinuxDoBrowser browser,LinuxDoJSQuery query,BlockingQueue<String> replies)throws Exception {
+    LinuxDoSettingsState settings=LinuxDoSettingsState.Companion.getInstance();boolean previous=settings.getHideAvatars();
+    TopicDetailResponse complete=(TopicDetailResponse)field(panel,"currentTopic");
+    evaluate(browser,query,replies,"(()=>{linuxDoPagination.jump(3);return {ok:true}})()");
+    // This fixture has not selected the editor yet; seed its recorded reading floor.
+    edt(()->{Field f=DocViewerPanel.class.getDeclaredField("currentPostNumber");f.setAccessible(true);f.set(panel,3);return null;});
+    try {
+      edt(()->{settings.setHideAvatars(true);settings.fireSettingsChanged();return null;});
+      awaitReaderBridge(browser,query,replies,"window.linuxDoPage?.hideAvatars===true&&!!document.querySelector('#floor-3 .boost-initial:not([hidden])')&&!document.querySelector('img.boost-avatar')");
+      await("avatar settings retain selected floor",()->evaluate(browser,query,replies,"({ok:document.querySelector('#floor-progress').value==='3'})").get("ok").getAsBoolean());
+      check("IDE_AVATAR_SETTING_APPLIES_WITHOUT_REOPENING_AND_RETAINS_FLOOR",true);
+      clickReaderElement(browser,query,replies,"#floor-3 .boost-user");
+      await("hidden public profile avatar",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('.reader-user-card .boost-initial')})").get("ok").getAsBoolean());
+      check("IDE_HIDDEN_PROFILE_USES_48PX_INITIAL",evaluate(browser,query,replies,"({ok:!document.querySelector('.reader-user-card img')&&document.querySelector('.reader-user-card .boost-initial').textContent==='f'&&document.querySelector('.reader-user-card .boost-initial').getBoundingClientRect().width===48&&!document.querySelector('#img-lightbox-overlay.active')})").get("ok").getAsBoolean());
+      evaluate(browser,query,replies,"(()=>{[...document.querySelectorAll('.topic-reader-panel button')].find(b=>b.textContent==='关闭').click();window.avatarPatchReceived=false;const receive=window.linuxDoReaderResult;window.linuxDoReaderResult=(key,id,result)=>{if(id==='avatar-patch'){window.avatarPatchReceived=!!result.html;window.linuxDoReaderResult=receive}receive(key,id,result)};window.intellijBridge.readerAction(linuxDoPage.key,'avatar-patch','postInfo','3',{});return {ok:true}})()");
+      await("post refresh patches hidden Boost avatar",()->evaluate(browser,query,replies,"({ok:avatarPatchReceived})").get("ok").getAsBoolean());
+      check("IDE_BOOST_PATCH_RESPECTS_HIDDEN_AVATARS",evaluate(browser,query,replies,"({ok:!document.querySelector('#floor-3 img.boost-avatar')&&document.querySelector('#floor-3 .boost-initial').textContent==='f'})").get("ok").getAsBoolean());
+      JsonObject paginatedJson=GSON.toJsonTree(complete).getAsJsonObject();JsonArray initialPosts=new JsonArray();
+      JsonArray allPosts=paginatedJson.getAsJsonObject("post_stream").getAsJsonArray("posts");initialPosts.add(allPosts.get(0));initialPosts.add(allPosts.get(1));paginatedJson.getAsJsonObject("post_stream").add("posts",initialPosts);
+      TopicDetailResponse paginated=GSON.fromJson(paginatedJson,TopicDetailResponse.class);
+      edt(()->{Field f=DocViewerPanel.class.getDeclaredField("currentTopic");f.setAccessible(true);f.set(panel,paginated);invoke(panel,"renderTopic",new Class<?>[]{TopicDetailResponse.class,Integer.class},paginated,2);return null;});
+      awaitReaderBridge(browser,query,replies,"document.querySelectorAll('.post-entry').length===2&&!!document.querySelector('#load-posts-after:not([hidden]):not(:disabled)')");
+      evaluate(browser,query,replies,"(()=>{document.querySelector('#load-posts-after').click();return {ok:true}})()");
+      await("pagination reloads hidden Boost",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('#floor-3 .boost-initial')})").get("ok").getAsBoolean());
+      check("IDE_PAGINATION_RESPECTS_HIDDEN_AVATARS",evaluate(browser,query,replies,"({ok:!document.querySelector('#floor-3 img.boost-avatar')&&document.querySelector('#floor-3 .boost-initial').textContent==='f'})").get("ok").getAsBoolean());
+    } finally {edt(()->{Field f=DocViewerPanel.class.getDeclaredField("currentTopic");f.setAccessible(true);f.set(panel,complete);settings.setHideAvatars(previous);settings.fireSettingsChanged();return null;});}
+    awaitReaderBridge(browser,query,replies,"window.linuxDoPage?.hideAvatars==="+previous+"&&document.querySelectorAll('.post-entry').length===12");
+    check("IDE_AVATAR_SETTING_CAN_BE_DISABLED_AGAIN",true);
+  }
   private static void boostReaderAcceptance(DocViewerPanel panel,LinuxDoBrowser browser,LinuxDoJSQuery query,BlockingQueue<String> replies,JFrame frame,
       java.util.concurrent.atomic.AtomicInteger sends,java.util.concurrent.atomic.AtomicInteger deletes,java.util.concurrent.atomic.AtomicBoolean reject,
       java.util.concurrent.atomic.AtomicReference<JsonObject> payload) throws Exception {
@@ -1748,13 +1781,13 @@ public class IdeUiSmoke implements ApplicationStarter {
   }
   private static void boostActionsAcceptance(LinuxDoBrowser browser,LinuxDoJSQuery query,BlockingQueue<String> replies,JFrame frame,java.util.concurrent.atomic.AtomicInteger flags,java.util.concurrent.atomic.AtomicInteger reads)throws Exception {
     int initialReads=reads.get();
-    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-3 .boost-expand').scrollIntoView({block:'center'});window.boostReportBody=document.querySelector('#floor-3 .post-content');window.boostAvatarBefore=document.querySelector('#floor-3 img.boost-avatar');return {ok:true}})()");
+    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-3 .boost-expand').scrollIntoView({block:'center'});window.boostReportBody=document.querySelector('#floor-3 .post-content');window.boostAvatarBefore=document.querySelector('#floor-3 .boost-avatar');return {ok:true}})()");
     clickReaderElement(browser,query,replies,"#floor-3 .boost-expand");
     check("IDE_BOOST_REPORT_IMMEDIATELY_CLICKABLE_WITHOUT_PERMISSION_REQUEST",reads.get()==initialReads&&evaluate(browser,query,replies,"({ok:!!document.querySelector('#floor-3 .boost-flag:not([hidden]):not(:disabled)')&&document.querySelector('#floor-3 .boost-expand').getAttribute('aria-expanded')==='true'})").get("ok").getAsBoolean());
     await("Boost permissions expanded",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('#floor-3 .boost-flag:not([hidden]):not(:disabled)')})").get("ok").getAsBoolean());
-    check("IDE_BOOST_PERMISSIONS_PRESERVE_EXISTING_AVATAR_AND_BODY",evaluate(browser,query,replies,"({ok:document.querySelector('#floor-3 img.boost-avatar')===boostAvatarBefore&&document.querySelector('#floor-3 .post-content')===boostReportBody})").get("ok").getAsBoolean());
+    check("IDE_BOOST_PERMISSIONS_PRESERVE_EXISTING_AVATAR_AND_BODY",evaluate(browser,query,replies,"({ok:document.querySelector('#floor-3 .boost-avatar')===boostAvatarBefore&&document.querySelector('#floor-3 .post-content')===boostReportBody})").get("ok").getAsBoolean());
     check("IDE_BOOST_ACTIONS_USE_LOADED_SERVER_PERMISSIONS",evaluate(browser,query,replies,"({ok:document.querySelector('#floor-3 .boost-expand').getAttribute('aria-expanded')==='true'&&!document.querySelector('#floor-3 [data-boost-delete]')})").get("ok").getAsBoolean());
-    evaluate(browser,query,replies,"(()=>{document.querySelector('#floor-3 .boost-avatar').src='data:image/svg+xml,%3Csvg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\"%3E%3Crect width=\"24\" height=\"24\" fill=\"%2379a\"/%3E%3C/svg%3E';return {ok:true}})()");
+    evaluate(browser,query,replies,"(()=>{let avatar=document.querySelector('#floor-3 img.boost-avatar');if(!avatar){avatar=document.createElement('img');avatar.className='boost-avatar';document.querySelector('#floor-3 .boost-user').prepend(avatar)}avatar.src='data:image/svg+xml,%3Csvg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\"%3E%3Crect width=\"24\" height=\"24\" fill=\"%2379a\"/%3E%3C/svg%3E';document.querySelector('#floor-3 .boost-initial').hidden=true;return {ok:true}})()");
     clickReaderElement(browser,query,replies,"#floor-3 img.boost-avatar");
     await("Boost public user card",()->evaluate(browser,query,replies,"({ok:!!document.querySelector('.reader-user-card')?.textContent.includes('fixture_booster')})").get("ok").getAsBoolean());
     check("IDE_BOOST_AVATAR_IMAGE_MOUSE_CLICK_OPENS_CARD_WITHOUT_LIGHTBOX",evaluate(browser,query,replies,"({ok:!document.querySelector('#img-lightbox-overlay.active')&&!!document.querySelector('.reader-user-card')})").get("ok").getAsBoolean());

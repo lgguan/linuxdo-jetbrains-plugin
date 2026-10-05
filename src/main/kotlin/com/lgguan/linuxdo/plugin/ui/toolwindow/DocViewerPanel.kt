@@ -995,6 +995,7 @@ class DocViewerPanel(private val project: Project) : JPanel(BorderLayout()), com
                     "topic" to detail.id, "author" to (detail.details?.createdBy?.username ?: detail.postStream.posts.firstOrNull { it.postNumber==1 }?.username),
                     "unreadFloor" to ((detail.lastReadPostNumber ?: 0)+1).takeIf { it <= (detail.highestPostNumber ?: 1) },
                     "notificationLevel" to detail.details?.notificationLevel, "loggedIn" to com.lgguan.linuxdo.plugin.service.LinuxDoAuthService.getInstance().isLoggedIn,
+                    "hideAvatars" to settings.hideAvatars,
                     "fontSize" to settings.readingFontSize, "defaultFontSize" to (theme.fontSize+2).coerceAtLeast(15), "lineHeight" to settings.readingLineHeight, "width" to settings.readingWidth,
                     "canVote" to detail.canVote, "userVoted" to detail.userVoted, "voteCount" to detail.voteCount, "votesLeft" to detail.votesLeft
                 )) + ";\n" + paginationSource

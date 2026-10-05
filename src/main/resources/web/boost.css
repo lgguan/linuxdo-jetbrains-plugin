@@ -3,6 +3,7 @@
 .boost-user { display:flex; flex:none; border:0; padding:0; border-radius:50%; cursor:pointer; background:transparent; color:var(--comment); }
 .boost-avatar { width:24px; height:24px; border-radius:50%; object-fit:cover; }
 .boost-initial { display:flex; align-items:center; justify-content:center; border:1px solid var(--border); box-sizing:border-box; }
+.boost-initial[hidden] { display:none; }
 .boost-content { min-width:0; overflow-wrap:anywhere; line-height:1.5; }
 .boost-content p { margin:0; }
 .boost-expand { border:0; padding:0; color:inherit; background:transparent; font:inherit; text-align:left; cursor:pointer; }
@@ -12,6 +13,7 @@
 .boost-action-status { font-size:12px; color:var(--comment); overflow-wrap:anywhere; }
 .reader-user-card { display:flex; align-items:center; gap:10px; margin:12px 0; }
 .reader-user-card img { width:48px; height:48px; border-radius:50%; }
+.reader-user-card .boost-initial { width:48px; height:48px; flex:none; color:var(--comment); background:var(--code-bg); }
 .boost-content img.emoji { display:inline-block; width:1.25em; height:1.25em; vertical-align:middle; }
 .boost-delete { flex:none; padding:0 2px; font-size:16px; }
 .post-operation-pending :is(.boost-container,.floor-actions) { pointer-events:none; opacity:.6; }
