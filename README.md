@@ -36,7 +36,7 @@
 
 ## 界面预览
 
-当前版本为 **1.0.4**，三项阅读设置默认不勾选，Boost 和用户资料遵循隐藏头像设置并支持首字母回退。此前的个人内容集中入口、书签管理、通知闭环、Markdown 编辑和 Boost 举报功能继续保留。完整更新及发布状态见[更新记录](CHANGELOG.md)和[1.0.4 发布验证](docs/release-1.0.4.md)；历史发布见[1.0.3 发布验证](docs/release-1.0.3.md)。
+当前版本为 **1.0.4**，三项阅读设置默认不勾选，Boost 和用户资料遵循隐藏头像设置并支持首字母回退。此前的个人内容集中入口、书签管理、通知闭环、Markdown 编辑和 Boost 举报功能继续保留。[GitHub Release](https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/tag/v1.0.4) 已发布，[JetBrains Stable](https://plugins.jetbrains.com/plugin/34669-linux-do-api-docs-/versions) 已上传，当前审核中。完整更新及发布状态见[更新记录](CHANGELOG.md)和[1.0.4 发布验证](docs/release-1.0.4.md)；历史发布见[1.0.3 发布验证](docs/release-1.0.3.md)。
 
 “论坛／我的”使用图标切换并高亮当前模块。“我的”提供话题、回复、书签和草稿四个页签，首次访问才读取，支持手动刷新与分页。话题、回复和草稿继续筛选已加载内容；书签默认搜索全部收藏，也可切换为本地筛选。草稿按实际键继续编辑，同键跨项目聚焦已有窗口；特殊类型使用网页入口。使用方法见[个人内容集中入口验收](docs/personal-content-verification.md)。内置浏览器登录页支持 Tab 和 Shift+Tab 在用户名、密码等控件间切换。
 

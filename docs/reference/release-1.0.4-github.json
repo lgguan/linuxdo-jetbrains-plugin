@@ -1,0 +1,45 @@
+{
+  "release": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/tag/v1.0.4",
+  "tag": "v1.0.4",
+  "commit": "e74c556c5dab3126b68659465d5973bb905352b5",
+  "publishedAt": "2026-10-05T06:51:58Z",
+  "assets": [
+    {
+      "name": "linuxdo-jetbrains-plugin-1.0.4-source.zip",
+      "size": 6974665,
+      "sha256": "cd2ede5c3f96d05c95ebc9b43db73610387c51070f18cca14206e33e50683a33",
+      "url": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/download/v1.0.4/linuxdo-jetbrains-plugin-1.0.4-source.zip",
+      "matchesLocal": true,
+      "verificationMethod": "GitHub server SHA-256 digest and file size"
+    },
+    {
+      "name": "linuxdo-jetbrains-plugin-1.0.4-source.zip.sha256",
+      "size": 109,
+      "sha256": "1ab35bf6d4a7d900594917f21d2ecad3966db493aff110956d7fb4ee10654302",
+      "url": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/download/v1.0.4/linuxdo-jetbrains-plugin-1.0.4-source.zip.sha256",
+      "matchesLocal": true,
+      "verificationMethod": "GitHub server SHA-256 digest and file size"
+    },
+    {
+      "name": "linuxdo-jetbrains-plugin-1.0.4.zip",
+      "size": 5598274,
+      "sha256": "f0ba6eb0f2c3256dfcd0e0ce0c713bc98c28ac9a4bc2d89d8a71b5f3d659185d",
+      "url": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/download/v1.0.4/linuxdo-jetbrains-plugin-1.0.4.zip",
+      "matchesLocal": true,
+      "verificationMethod": "GitHub server SHA-256 digest and file size"
+    },
+    {
+      "name": "linuxdo-jetbrains-plugin-1.0.4.zip.sha256",
+      "size": 102,
+      "sha256": "7c6e37ad3fece4c3246ba1de2993e0d4f630d40029e641fec47bd3a2f50a28b2",
+      "url": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/download/v1.0.4/linuxdo-jetbrains-plugin-1.0.4.zip.sha256",
+      "matchesLocal": true,
+      "verificationMethod": "GitHub server SHA-256 digest and file size"
+    }
+  ],
+  "latestReleaseConfirmed": true,
+  "ci": {
+    "url": "https://github.com/lgguan/linuxdo-jetbrains-plugin/actions/runs/37273849528",
+    "conclusion": "success"
+  }
+}

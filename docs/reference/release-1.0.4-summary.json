@@ -29,6 +29,31 @@
   ],
   "marketplaceId": 34669,
   "restartRequired": true,
-  "githubPublished": false,
-  "marketplaceUploaded": false
+  "githubPublished": true,
+  "marketplaceUploaded": true,
+  "sourceCommit": "e74c556c5dab3126b68659465d5973bb905352b5",
+  "githubRelease": "https://github.com/lgguan/linuxdo-jetbrains-plugin/releases/tag/v1.0.4",
+  "githubAttachmentsMatchLocal": true,
+  "ci": {
+    "url": "https://github.com/lgguan/linuxdo-jetbrains-plugin/actions/runs/37273849528",
+    "conclusion": "success"
+  },
+  "ciBuildPlatforms": [
+    "Windows",
+    "macOS",
+    "Linux"
+  ],
+  "sourceArchive": {
+    "matchesCommit": true,
+    "files": 427,
+    "textEolNormalized": true
+  },
+  "marketplace": {
+    "updateId": 1187670,
+    "channel": "Stable",
+    "status": "Under review",
+    "contentsMatchLocal": true,
+    "logicalEntries": 1864,
+    "previousVersionRetained": true
+  }
 }
